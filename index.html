@@ -1086,7 +1086,9 @@ async function loadDeals() {
   // UF_CRM_1609923110282 = Комментарий (доп. поле)
   const FIELD_POLICY_END   = 'UF_CRM_1609921954607';
   const FIELD_POLICY_START = 'UF_CRM_1609921922120';
-  const FIELD_COMMENT_UF   = 'UF_CRM_1609923110282';
+  const FIELD_COMMENT_UF   = 'UF_CRM_1668776684344';  // Комментарий менеджера
+  const FIELD_SOURCE       = 'UF_CRM_1609920495607';   // Источник сделки
+  const SOURCE_PROLONGATION = '76';                      // ID Пролонгация
   const FIELD_SK           = 'UF_CRM_1606650631517';
   const FIELD_BANK         = 'UF_CRM_1621250213416';
   const FIELD_PREMIUM      = 'UF_CRM_1621248599553';
@@ -1099,7 +1101,7 @@ async function loadDeals() {
       'CONTACT_ID','DATE_CREATE',
       FIELD_POLICY_END, FIELD_POLICY_START,
       FIELD_COMMENT_UF, FIELD_SK, FIELD_BANK, FIELD_PREMIUM,
-      'UF_CRM_1611755457413', 'SOURCE_ID', 'IS_RETURN_CUSTOMER'
+      FIELD_SOURCE, 'UF_CRM_1611755457413', 'SOURCE_ID', 'IS_RETURN_CUSTOMER'
     ]
   });
 
@@ -1121,11 +1123,10 @@ async function loadDeals() {
     const rawStart = d[FIELD_POLICY_START];
     d._policyStart = rawStart ? new Date(rawStart) : null;
 
-    // Comments — check both standard and UF field
-    const commentUF = d[FIELD_COMMENT_UF] || '';
-    const commentStd = d.COMMENTS || '';
-    d._commentText = (commentUF + (commentUF && commentStd ? '\n' : '') + commentStd).trim();
-    d._hasComment = !!d._commentText;
+    // Real comment field (COMMENTS = BitrixGPT, use UF_CRM_1668776684344)
+    const commentRaw = (d[FIELD_COMMENT_UF] || '').replace(/\[\/?[a-z]+\]/gi,' ').replace(/\s+/g,' ').trim();
+    d._commentText = commentRaw;
+    d._hasComment = !!commentRaw;
 
     // SK and bank
     d._sk = d[FIELD_SK] || '';
@@ -1135,8 +1136,28 @@ async function loadDeals() {
 
     d._daysUntil = daysUntil(policyEnd);
     d._threshold = getDaysThreshold(d._type);
-    d._needsProlongation = policyEnd && d._daysUntil !== null && d._daysUntil >= 0 && d._daysUntil <= d._threshold;
+    d._source = (d[FIELD_SOURCE] || '').toString();
+    const createYear = d.DATE_CREATE ? new Date(d.DATE_CREATE).getFullYear() : 0;
+    d._isCurrentYear = createYear === new Date().getFullYear();
+    // Only show deals NOT created this year (prev years need prolongation)
+    d._needsProlongation = policyEnd
+      && d._daysUntil !== null
+      && d._daysUntil >= 0
+      && d._daysUntil <= d._threshold
+      && !d._isCurrentYear;
     return d;
+  });
+
+  // Exclude deals where prolongation already exists this year (same contact+category)
+  const alreadyProlonged = new Set();
+  ALL_DEALS.filter(d => d._isCurrentYear && d.CONTACT_ID).forEach(d => {
+    alreadyProlonged.add(d.CONTACT_ID + '_' + d.CATEGORY_ID);
+  });
+  ALL_DEALS.forEach(d => {
+    if (d._needsProlongation && d.CONTACT_ID && alreadyProlonged.has(d.CONTACT_ID + '_' + d.CATEGORY_ID)) {
+      d._alreadyProlonged = true;
+      d._needsProlongation = false;
+    }
   });
 
   // Load managers
@@ -1182,10 +1203,13 @@ function renderDashboard() {
   if (FILTERED_DEALS.length === 0) {
     html = `<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-title">Нет пролонгаций на ближайшие дни</div><div class="empty-sub">Всё актуально</div></div>`;
   } else {
-    // Warning deals (with comments)
+    // Warning deals (with comments) - compact collapsible
     const warned = FILTERED_DEALS.filter(d => d._hasComment);
     if (warned.length > 0) {
-      html += `<div class="alert alert-warn" style="margin-bottom:20px"><div class="alert-icon">⚠️</div><div class="alert-body"><div class="alert-title">${warned.length} сделок с комментариями — требуют внимания менеджера</div><div class="alert-text">${warned.map(d => `<b>${d.TITLE}</b> (${d._type}): ${d.COMMENTS}`).join('<br>')}</div></div></div>`;
+      const warnList = warned.slice(0,5).map(d =>
+        '<div style="padding:5px 0;border-bottom:1px solid rgba(245,166,35,0.15);font-size:12px"><b>' + d.TITLE + '</b> <span style="color:var(--text3)">(' + d._type + ')</span><br><span style="opacity:0.8">' + d._commentText.slice(0,100) + (d._commentText.length>100?'...':'') + '</span></div>'
+      ).join('') + (warned.length>5 ? '<div style="font-size:11px;color:var(--text3);margin-top:6px">и ещё ' + (warned.length-5) + ' сделок</div>' : '');
+      html += '<div class="alert alert-warn" style="margin-bottom:20px"><div class="alert-icon">⚠️</div><div class="alert-body"><div class="alert-title" style="cursor:pointer" onclick="var n=this.nextElementSibling;n.style.display=n.style.display===\'none\'?\'block\':\'none\'">' + warned.length + ' сделок с комментариями ▾</div><div style="display:none;margin-top:8px">' + warnList + '</div></div></div>';
     }
 
     // By type breakdown
@@ -1267,6 +1291,7 @@ async function createProlongationDeal(sourceDeal) {
     COMMENTS: descParts.join('\n\n'),
     OPPORTUNITY: sourceDeal.OPPORTUNITY,
     SOURCE_ID: 'REPEAT_SALE',
+    [FIELD_SOURCE]: SOURCE_PROLONGATION,
     UF_CRM_SOURCE_DEAL: sourceDeal.ID,
     // Copy policy end date field
     [sourceDeal._policyEndField || 'UF_CRM_DATE_END']: sourceDeal._policyEnd ? sourceDeal._policyEnd.toISOString().split('T')[0] : ''
@@ -1459,6 +1484,13 @@ async function createSingleProlongation(deal) {
 }
 
 // ===== POINTS CALCULATION =====
+// User ID 9 = Анна Шишлова — exclude from points
+const EXCLUDED_USER_IDS = ['9'];
+
+// Known managers map (ID → display name)
+// Will be populated from user.get API call
+let MANAGER_IDS = {}; // filled in loadDeals
+
 async function loadPoints() {
   if (!CONFIG.webhook) return;
   document.getElementById('points-content').innerHTML = '<div class="empty-state"><div class="spinner"></div><div class="empty-sub" style="margin-top:12px">Считаем баллы...</div></div>';
@@ -1481,6 +1513,14 @@ async function loadPoints() {
       (cats || []).forEach(c => { catMap[c.ID] = c.NAME; });
     } catch(e) {}
 
+    // Make sure MANAGERS is loaded
+    if (!Object.keys(MANAGERS).length) {
+      try {
+        const users = await bxCall('user.get', { FILTER: { ACTIVE: true } });
+        (users || []).forEach(u => { MANAGERS[u.ID] = (u.NAME + ' ' + u.LAST_NAME).trim(); });
+      } catch(e) {}
+    }
+
     const wonDeals = await bxCallAll('crm.deal.list', {
       filter: {
         'STAGE_SEMANTIC_ID': 'S',
@@ -1488,27 +1528,132 @@ async function loadPoints() {
         '<=CLOSEDATE': dateTo.toISOString().split('T')[0]
       },
       select: ['ID','TITLE','ASSIGNED_BY_ID','OPPORTUNITY','CATEGORY_ID','CLOSEDATE',
-               'UF_CRM_1609921954607','UF_CRM_1609921922120',
-               'UF_CRM_1621248599553','UF_CRM_1606650631517',
-               'UF_CRM_1611755457413','SOURCE_ID','IS_RETURN_CUSTOMER']
+               'CONTACT_ID','UF_CRM_1609921922120','UF_CRM_1609921954607',
+               'UF_CRM_1621248599553','UF_CRM_1621249661361',
+               'UF_CRM_1606650631517','UF_CRM_1611755457413',
+               'UF_CRM_1609920495607','SOURCE_ID','IS_RETURN_CUSTOMER']
     });
 
-    const byManager = {};
-    wonDeals.forEach(d => {
+    // Filter out excluded users
+    const filtered = wonDeals.filter(d => !EXCLUDED_USER_IDS.includes(String(d.ASSIGNED_BY_ID)));
+
+    // Enrich deals
+    filtered.forEach(d => {
       d.CATEGORY_NAME = catMap[d.CATEGORY_ID] || '';
       d._type = getPipelineType(d);
-      const res = calcPoints(d);
-      d._points = res.points;
-      d._pointsNote = res.note;
+      d._isProl = ['76','80'].includes((d['UF_CRM_1609920495607']||'').toString())
+        || d.IS_RETURN_CUSTOMER === 'Y'
+        || d.SOURCE_ID === 'REPEAT_SALE';
+    });
+
+    // For ИПОТЕКА: group by contact+manager+month to pair жизнь+имущество
+    // Build paired groups first, then calculate points
+    const ipotekaByContact = {}; // contactId+managerId -> [deals]
+    filtered.forEach(d => {
+      if (d._type !== 'ИПОТЕКА') return;
+      const key = (d.CONTACT_ID||d.ID) + '_' + d.ASSIGNED_BY_ID;
+      if (!ipotekaByContact[key]) ipotekaByContact[key] = [];
+      ipotekaByContact[key].push(d);
+    });
+
+    // Detect life/property for each deal
+    filtered.forEach(d => {
+      const t = (d.TITLE||'').toLowerCase();
+      d._isLife = /жизн|жизь|ж|жз|life|нс/.test(t);
+      d._isProperty = /дом|кварт|имущ|д|апарт|комнат/.test(t);
+      // If neither detected, try to infer from premium fields
+      if (!d._isLife && !d._isProperty) {
+        const premLife = parseFloat((d['UF_CRM_1621248599553']||'').split('|')[0]) || 0;
+        const premProp = parseFloat((d['UF_CRM_1621249661361']||'').split('|')[0]) || 0;
+        if (premLife > 0 && premProp === 0) d._isLife = true;
+        if (premProp > 0 && premLife === 0) d._isProperty = true;
+      }
+    });
+
+    // Calculate points with pairing logic for ипотека
+    const processedIds = new Set();
+    filtered.forEach(d => {
+      if (processedIds.has(d.ID)) return;
+
+      if (d._type === 'ИПОТЕКА') {
+        const key = (d.CONTACT_ID||d.ID) + '_' + d.ASSIGNED_BY_ID;
+        const group = ipotekaByContact[key] || [d];
+
+        if (group.length > 1) {
+          // Paired deal — calculate together, assign points to first, 0 to second
+          const lifeDeals = group.filter(x => x._isLife);
+          const propDeals = group.filter(x => x._isProperty);
+          const totalSum = group.reduce((s,x) => s + (parseFloat(x.OPPORTUNITY)||0), 0);
+
+          if (lifeDeals.length > 0 && propDeals.length > 0) {
+            // Paired жизнь+имущество
+            const res = calcIpotekaPoints(totalSum, true, true, d._isProl);
+            group[0]._points = res.points;
+            group[0]._pointsNote = res.note + ' (пара)';
+            group[0]._isPaired = true;
+            for (let i = 1; i < group.length; i++) {
+              group[i]._points = 0;
+              group[i]._pointsNote = 'учтено в паре';
+              group[i]._isPaired = true;
+              group[i]._pairRef = group[0].TITLE;
+            }
+          } else {
+            // Multiple same-type deals — calc each individually
+            group.forEach(x => {
+              const res = calcIpotekaPoints(parseFloat(x.OPPORTUNITY)||0, x._isLife, x._isProperty, x._isProl);
+              x._points = res.points;
+              x._pointsNote = res.note;
+            });
+          }
+          group.forEach(x => processedIds.add(x.ID));
+        } else {
+          // Single ипотека deal
+          const sum = parseFloat(d.OPPORTUNITY) || 0;
+          const res = calcIpotekaPoints(sum, d._isLife, d._isProperty, d._isProl);
+          d._points = res.points;
+          d._pointsNote = res.note;
+          processedIds.add(d.ID);
+        }
+      } else {
+        // Non-ипотека
+        const res = calcPoints(d);
+        d._points = res.points;
+        d._pointsNote = res.note;
+        processedIds.add(d.ID);
+      }
+    });
+
+    // Group by manager
+    const byManager = {};
+    filtered.forEach(d => {
       const mid = d.ASSIGNED_BY_ID;
       if (!byManager[mid]) byManager[mid] = { deals: [], total: 0 };
       byManager[mid].deals.push(d);
-      byManager[mid].total += d._points;
+      byManager[mid].total += d._points || 0;
     });
 
     renderPoints(byManager, dateFrom);
   } catch(e) {
     document.getElementById('points-content').innerHTML = `<div class="alert alert-err"><div class="alert-icon">✗</div><div class="alert-body"><div class="alert-title">Ошибка</div><div class="alert-text">${e.message}</div></div></div>`;
+  }
+}
+
+function calcIpotekaPoints(sum, isLife, isProperty, isProl) {
+  if (!isProl) {
+    // Новая сделка
+    if (isLife && isProperty) return { points: 2, note: 'Новая: жизнь+имущество' };
+    if (isLife)               return { points: 1, note: 'Новая: жизнь' };
+    if (isProperty)           return { points: 0.5, note: 'Новая: имущество' };
+    return { points: 0, note: '⚠ тип не определён' };
+  } else {
+    // Пролонгация
+    if (isLife && isProperty) {
+      if (sum > 4000) return { points: 2, note: 'Прол: жизнь+имущество > 4000 ₽' };
+      return { points: 0, note: 'Прол: жизнь+имущество ≤ 4000 ₽' };
+    }
+    if (isLife)     return sum > 1500 ? { points: 1, note: 'Прол: жизнь > 1500 ₽' } : { points: 0, note: 'Прол: жизнь ≤ 1500 ₽' };
+    if (isProperty) return sum > 1500 ? { points: 1, note: 'Прол: имущество > 1500 ₽' } : { points: 0, note: 'Прол: имущество ≤ 1500 ₽' };
+    return { points: 0, note: '⚠ тип не определён' };
   }
 }
 
