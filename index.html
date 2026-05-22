@@ -1736,7 +1736,33 @@ function calcOsagoPoints(sum, kvPct) {
   return result;
 }
 
-// calcPoints defined above
+function calcPoints(deal) {
+  const type = deal._type;
+  const sum = parseFloat(deal.OPPORTUNITY) || 0;
+  const kvPct = parseFloat(deal['UF_CRM_1611755457413'] || 0);
+
+  if (type === 'ОСАГО') {
+    const pts = calcOsagoPoints(sum, kvPct);
+    return { points: pts, note: kvPct ? 'КВ ' + kvPct + '%' : '⚠ нет КВ — ошибка менеджера' };
+  }
+
+  if (type === 'КАСКО' || type === 'КАСКО_ЛИД') {
+    if (sum < 20000) return { points: 1, note: '< 20 000' };
+    const pts = Math.floor((sum - 20000) / 10000) + 3;
+    const from = 20000 + Math.floor((sum - 20000) / 10000) * 10000;
+    const to = from + 10000;
+    return { points: pts, note: (from/1000) + '–' + (to/1000) + ' тыс → ' + pts + ' б' };
+  }
+
+  if (type === 'ИПОТЕКА') {
+    const isLife = deal._isLife || false;
+    const isProperty = deal._isProperty || false;
+    const isProl = deal._isProl || false;
+    return calcIpotekaPoints(sum, isLife, isProperty, isProl);
+  }
+
+  return { points: 0, note: 'Прочее' };
+}
 
 function calcSalaryFromPoints(points) {
   const tiers = [[76,400],[66,350],[56,300],[46,200],[36,100]];
