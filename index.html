@@ -509,6 +509,9 @@
       <span class="nav-icon">🔍</span> Сверка
       <span class="nav-badge" id="badge-missing" style="display:none">0</span>
     </div>
+    <div class="nav-item" onclick="showPage('finances')" id="nav-finances">
+      <span class="nav-icon">💰</span> Финансы
+    </div>
     <div class="nav-item" onclick="showPage('log')" id="nav-log">
       <span class="nav-icon">📋</span> Журнал
     </div>
@@ -803,6 +806,67 @@
           <div class="empty-icon">🔍</div>
           <div class="empty-title">Нажмите «Проверить»</div>
           <div class="empty-sub">Система сравнит сделки прошлого года с пролонгациями текущего</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FINANCES PAGE -->
+    <div class="page" id="page-finances">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Финансы</div>
+          <div class="page-desc">Доходы, расходы и маржа по менеджерам</div>
+        </div>
+        <div class="header-actions">
+          <select class="filter-select" id="fin-month" onchange="loadFinances()">
+            <option value="">Текущий месяц</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" onclick="loadFinances()">🔄 Обновить</button>
+          <button class="btn btn-secondary btn-sm" onclick="exportFinancesExcel()">📥 Excel</button>
+        </div>
+      </div>
+
+      <!-- TOTAL SUMMARY -->
+      <div id="fin-summary" style="display:none;margin-bottom:24px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px">
+          <div class="stat-card">
+            <div class="stat-label">Выручка (КВ)</div>
+            <div class="stat-value green" id="fin-total-revenue">—</div>
+            <div class="stat-sub">всего по всем менеджерам</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Расходы</div>
+            <div class="stat-value red" id="fin-total-costs">—</div>
+            <div class="stat-sub">оклад + лиды + баллы</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Маржа</div>
+            <div class="stat-value" id="fin-total-margin">—</div>
+            <div class="stat-sub">выручка минус расходы</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Потери</div>
+            <div class="stat-value amber" id="fin-total-loss">—</div>
+            <div class="stat-sub">проваленные сделки</div>
+          </div>
+        </div>
+        <!-- Charts row -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius2);padding:20px">
+            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:16px;text-transform:uppercase;letter-spacing:0.5px">Доходы vs Расходы по менеджерам</div>
+            <canvas id="fin-chart-bar" height="180"></canvas>
+          </div>
+          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius2);padding:20px">
+            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:16px;text-transform:uppercase;letter-spacing:0.5px">Структура расходов</div>
+            <canvas id="fin-chart-costs" height="180"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div id="fin-content">
+        <div class="empty-state">
+          <div class="empty-icon">💰</div>
+          <div class="empty-title">Выберите месяц и нажмите Обновить</div>
         </div>
       </div>
     </div>
@@ -2053,16 +2117,18 @@ function clearLog() {
 
 // ===== MONTH FILTER =====
 function fillMonthFilter() {
-  const sel = document.getElementById('points-month');
   const now = new Date();
   let html = '<option value="">Текущий месяц</option>';
   for (let i = 1; i <= 12; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const val = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
     const label = d.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
-    html += `<option value="${val}">${label}</option>`;
+    html += '<option value="' + val + '">' + label + '</option>';
   }
-  sel.innerHTML = html;
+  ['points-month','fin-month'].forEach(function(id) {
+    const sel = document.getElementById(id);
+    if (sel) sel.innerHTML = html;
+  });
 }
 
 // ===== RECONCILE =====
@@ -2230,6 +2296,334 @@ function renderReconcile() {
   html += '</tbody></table></div>';
   document.getElementById('rec-content').innerHTML = html;
   addLog('warn', `Сверка завершена: ${missing.length} сделок без пролонгации из ${total}`);
+}
+
+// ===== FINANCES =====
+const SALARY_BASE = 30000; // оклад
+const LEAD_COST_IPOTEKA = 45;  // цена лида ипотека
+const LEAD_COST_KASKO = 80;    // цена лида каско
+const SOURCE_LID = '72';       // Новая сделка ЛИД
+const SOURCE_REK = '74';       // Новая сделка РЕК
+
+let FIN_DATA = {}; // finances data per manager
+
+async function loadFinances() {
+  if (!CONFIG.webhook) return;
+  document.getElementById('fin-content').innerHTML = '<div class="empty-state"><div class="spinner"></div><div class="empty-sub" style="margin-top:12px">Загружаем данные...</div></div>';
+  document.getElementById('fin-summary').style.display = 'none';
+
+  try {
+    const monthVal = document.getElementById('fin-month').value;
+    let dateFrom, dateTo;
+    const now = new Date();
+    if (monthVal) {
+      const [y, m] = monthVal.split('-').map(Number);
+      dateFrom = new Date(y, m-1, 1);
+      dateTo = new Date(y, m, 0);
+    } else {
+      dateFrom = new Date(now.getFullYear(), now.getMonth(), 1);
+      dateTo = new Date(now.getFullYear(), now.getMonth()+1, 0);
+    }
+
+    const dateFromStr = dateFrom.toISOString().split('T')[0];
+    const dateToStr = dateTo.toISOString().split('T')[0];
+
+    // Load categories
+    let catMap = {};
+    try {
+      const cats = await bxCall('crm.dealcategory.list', {});
+      (cats||[]).forEach(c => { catMap[c.ID] = c.NAME; });
+    } catch(e) {}
+
+    // Ensure managers loaded
+    if (!Object.keys(MANAGERS).length) {
+      try {
+        const users = await bxCall('user.get', { FILTER: { ACTIVE: true } });
+        (users||[]).forEach(u => { MANAGERS[u.ID] = (u.NAME + ' ' + u.LAST_NAME).trim(); });
+      } catch(e) {}
+    }
+
+    // Load ALL deals for the month (won + failed + all)
+    const allDeals = await bxCallAll('crm.deal.list', {
+      filter: {
+        '>=DATE_CREATE': dateFromStr,
+        '<=DATE_CREATE': dateToStr
+      },
+      select: ['ID','TITLE','ASSIGNED_BY_ID','OPPORTUNITY','CATEGORY_ID',
+               'STAGE_SEMANTIC_ID','CLOSEDATE','DATE_CREATE',
+               'UF_CRM_1609920495607','UF_CRM_1611755457413','SOURCE_ID']
+    });
+
+    // Enrich
+    allDeals.forEach(d => {
+      d.CATEGORY_NAME = catMap[d.CATEGORY_ID] || '';
+      d._type = getPipelineType(d);
+      d._source = (d['UF_CRM_1609920495607']||'').toString();
+      d._kv = parseFloat(d['UF_CRM_1611755457413']||0);
+      d._sum = parseFloat(d.OPPORTUNITY||0);
+      d._isWon = d.STAGE_SEMANTIC_ID === 'S';
+      d._isFailed = d.STAGE_SEMANTIC_ID === 'F';
+      d._isLid = d._source === SOURCE_LID;
+      d._isRek = d._source === SOURCE_REK;
+      d._isProl = ['76','80'].includes(d._source);
+    });
+
+    // Also load points data if not loaded for this month
+    // Build per-manager financial data
+    const byManager = {};
+    const managerIds = [...new Set(allDeals.map(d => d.ASSIGNED_BY_ID))];
+
+    managerIds.filter(mid => !EXCLUDED_USER_IDS.includes(String(mid))).forEach(mid => {
+      const deals = allDeals.filter(d => d.ASSIGNED_BY_ID === mid);
+      const wonDeals = deals.filter(d => d._isWon);
+      const failedDeals = deals.filter(d => d._isFailed);
+      const lidDeals = deals.filter(d => d._isLid);
+
+      // Revenue by product (КВ)
+      let revenueIpoteka = 0, revenueKasko = 0, revenueOsago = 0, revenueProchee = 0;
+      wonDeals.forEach(d => {
+        const sum = d._sum;
+        if (d._type === 'ИПОТЕКА') revenueIpoteka += sum * 0.5;
+        else if (d._type === 'КАСКО' || d._type === 'КАСКО_ЛИД') revenueKasko += sum * (d._kv/100 || 0.22);
+        else if (d._type === 'ОСАГО') revenueOsago += sum * (d._kv/100 || 0.15);
+        else revenueProchee += sum * 0.5;
+      });
+
+      const totalRevenue = revenueIpoteka + revenueKasko + revenueOsago + revenueProchee;
+
+      // Costs
+      const lidIpotekaCount = lidDeals.filter(d => d._type === 'ИПОТЕКА').length;
+      const lidKaskoCount = lidDeals.filter(d => d._type === 'КАСКО' || d._type === 'КАСКО_ЛИД').length;
+      const leadCosts = lidIpotekaCount * LEAD_COST_IPOTEKA + lidKaskoCount * LEAD_COST_KASKO;
+
+      // Points salary (need points calculation)
+      let totalPoints = 0;
+      wonDeals.forEach(d => {
+        d._type2 = getPipelineType(d);
+        const title = (d.TITLE||'').toLowerCase();
+        d._isLife = /жизн|жизь|ж|жз|life|нс/.test(title);
+        d._isProperty = /дом|кварт|имущ|д|апарт|комнат/.test(title);
+        d._isProlCalc = ['76','80'].includes(d._source) || d.IS_RETURN_CUSTOMER === 'Y';
+        const res = calcPoints(d);
+        totalPoints += res.points || 0;
+      });
+      const pointsSalary = calcSalaryFromPoints(totalPoints);
+
+      const totalCosts = SALARY_BASE + leadCosts + pointsSalary;
+      const margin = totalRevenue - totalCosts;
+
+      // Lost revenue (failed deals)
+      let lostRevenue = 0;
+      failedDeals.forEach(d => {
+        const sum = d._sum;
+        if (d._type === 'ИПОТЕКА') lostRevenue += sum * 0.5;
+        else if (d._type === 'КАСКО' || d._type === 'КАСКО_ЛИД') lostRevenue += sum * (d._kv/100 || 0.22);
+        else if (d._type === 'ОСАГО') lostRevenue += sum * (d._kv/100 || 0.15);
+      });
+
+      // Deal counts by type and source
+      const counts = {
+        ipotekaNew: wonDeals.filter(d => d._type==='ИПОТЕКА' && !d._isProl && !d._isRek).length,
+        ipotekaProl: wonDeals.filter(d => d._type==='ИПОТЕКА' && d._isProl).length,
+        ipotekaRek: wonDeals.filter(d => d._type==='ИПОТЕКА' && d._isRek).length,
+        kaskoNew: wonDeals.filter(d => (d._type==='КАСКО'||d._type==='КАСКО_ЛИД') && !d._isProl && !d._isRek).length,
+        kaskoProl: wonDeals.filter(d => (d._type==='КАСКО'||d._type==='КАСКО_ЛИД') && d._isProl).length,
+        kaskoRek: wonDeals.filter(d => (d._type==='КАСКО'||d._type==='КАСКО_ЛИД') && d._isRek).length,
+        osago: wonDeals.filter(d => d._type==='ОСАГО').length,
+        total: wonDeals.length,
+        failed: failedDeals.length,
+        lids: lidDeals.length
+      };
+
+      byManager[mid] = {
+        revenue: totalRevenue,
+        revenueIpoteka, revenueKasko, revenueOsago, revenueProchee,
+        costs: totalCosts,
+        salary: SALARY_BASE,
+        leadCosts,
+        pointsSalary,
+        totalPoints,
+        margin,
+        lostRevenue,
+        counts,
+        wonDeals,
+        failedDeals
+      };
+    });
+
+    FIN_DATA = byManager;
+    renderFinances(byManager, dateFrom);
+
+  } catch(e) {
+    document.getElementById('fin-content').innerHTML = '<div class="alert alert-err"><div class="alert-icon">✗</div><div class="alert-body"><div class="alert-title">Ошибка</div><div class="alert-text">' + e.message + '</div></div></div>';
+  }
+}
+
+function fmt(n) { return Math.round(n).toLocaleString('ru-RU') + ' ₽'; }
+
+function renderFinances(byManager, dateFrom) {
+  if (!Object.keys(byManager).length) {
+    document.getElementById('fin-content').innerHTML = '<div class="empty-state"><div class="empty-icon">💰</div><div class="empty-title">Нет данных</div></div>';
+    return;
+  }
+
+  const monthStr = dateFrom ? dateFrom.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }) : '';
+
+  // Totals
+  const totRevenue = Object.values(byManager).reduce((s,d) => s+d.revenue, 0);
+  const totCosts = Object.values(byManager).reduce((s,d) => s+d.costs, 0);
+  const totMargin = totRevenue - totCosts;
+  const totLoss = Object.values(byManager).reduce((s,d) => s+d.lostRevenue, 0);
+
+  document.getElementById('fin-total-revenue').textContent = fmt(totRevenue);
+  document.getElementById('fin-total-costs').textContent = fmt(totCosts);
+  document.getElementById('fin-total-margin').textContent = fmt(totMargin);
+  document.getElementById('fin-total-margin').style.color = totMargin >= 0 ? 'var(--green)' : 'var(--red)';
+  document.getElementById('fin-total-loss').textContent = fmt(totLoss);
+  document.getElementById('fin-summary').style.display = 'block';
+
+  // Charts
+  renderFinCharts(byManager);
+
+  // Manager cards
+  const colors = ['#7c6af7','#2dd4a0','#4da3f5','#f5a623'];
+  let html = '<div style="font-size:12px;color:var(--text3);margin-bottom:16px;text-transform:uppercase;letter-spacing:0.5px">' + monthStr + '</div>';
+
+  Object.entries(byManager).forEach(([mid, d], idx) => {
+    const name = MANAGERS[mid] || 'Менеджер';
+    const initials = name.split(' ').slice(0,2).map(n=>n[0]).join('').toUpperCase();
+    const color = colors[idx % colors.length];
+    const marginColor = d.margin >= 0 ? 'var(--green)' : 'var(--red)';
+
+    html += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px">';
+
+    // Header
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">';
+    html += '<div style="display:flex;align-items:center;gap:12px">';
+    html += '<div style="width:40px;height:40px;border-radius:50%;background:rgba(124,106,247,0.2);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;color:' + color + '">' + initials + '</div>';
+    html += '<div><div style="font-size:15px;font-weight:600">' + name + '</div>';
+    html += '<div style="font-size:12px;color:var(--text3)">' + d.counts.total + ' сделок · ' + d.counts.lids + ' лидов куплено</div></div></div>';
+    html += '<div style="text-align:right"><div style="font-size:11px;color:var(--text3)">Маржа</div>';
+    html += '<div style="font-size:28px;font-weight:700;color:' + marginColor + ';letter-spacing:-1px">' + fmt(d.margin) + '</div></div>';
+    html += '</div>';
+
+    // Revenue / Costs row
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">';
+
+    // Revenue block
+    html += '<div style="background:var(--bg3);border-radius:var(--radius);padding:16px">';
+    html += '<div style="font-size:11px;font-weight:600;color:var(--green);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px">💵 Выручка (КВ) — ' + fmt(d.revenue) + '</div>';
+    html += '<div style="font-size:12px;display:flex;flex-direction:column;gap:6px">';
+    if (d.revenueIpoteka) html += '<div style="display:flex;justify-content:space-between"><span style="color:var(--text2)">Ипотека</span><span>' + fmt(d.revenueIpoteka) + '</span></div>';
+    if (d.revenueKasko) html += '<div style="display:flex;justify-content:space-between"><span style="color:var(--text2)">КАСКО</span><span>' + fmt(d.revenueKasko) + '</span></div>';
+    if (d.revenueOsago) html += '<div style="display:flex;justify-content:space-between"><span style="color:var(--text2)">ОСАГО</span><span>' + fmt(d.revenueOsago) + '</span></div>';
+    if (d.revenueProchee) html += '<div style="display:flex;justify-content:space-between"><span style="color:var(--text2)">Прочее</span><span>' + fmt(d.revenueProchee) + '</span></div>';
+    html += '</div></div>';
+
+    // Costs block
+    html += '<div style="background:var(--bg3);border-radius:var(--radius);padding:16px">';
+    html += '<div style="font-size:11px;font-weight:600;color:var(--red);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px">📤 Расходы — ' + fmt(d.costs) + '</div>';
+    html += '<div style="font-size:12px;display:flex;flex-direction:column;gap:6px">';
+    html += '<div style="display:flex;justify-content:space-between"><span style="color:var(--text2)">Оклад</span><span>' + fmt(d.salary) + '</span></div>';
+    html += '<div style="display:flex;justify-content:space-between"><span style="color:var(--text2)">Стоимость лидов (' + d.counts.lids + ')</span><span>' + fmt(d.leadCosts) + '</span></div>';
+    html += '<div style="display:flex;justify-content:space-between"><span style="color:var(--text2)">Зарплата за баллы (' + d.totalPoints.toFixed(1) + ' б)</span><span>' + fmt(d.pointsSalary) + '</span></div>';
+    html += '</div></div>';
+    html += '</div>';
+
+    // Deal breakdown
+    html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">';
+    const pills = [
+      ['🏠 Ипотека', d.counts.ipotekaNew + 'н / ' + d.counts.ipotekaProl + 'п / ' + d.counts.ipotekaRek + 'р'],
+      ['🚗 КАСКО', d.counts.kaskoNew + 'н / ' + d.counts.kaskoProl + 'п / ' + d.counts.kaskoRek + 'р'],
+      ['📋 ОСАГО', d.counts.osago + ' сделок'],
+    ];
+    pills.forEach(([label, val]) => {
+      html += '<div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px">';
+      html += '<div style="font-size:11px;color:var(--text3);margin-bottom:4px">' + label + '</div>';
+      html += '<div style="font-size:13px;font-weight:600">' + val + '</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+
+    // Lost revenue
+    if (d.lostRevenue > 0) {
+      html += '<div style="background:rgba(245,166,35,0.08);border:1px solid rgba(245,166,35,0.2);border-radius:var(--radius);padding:12px;font-size:13px">';
+      html += '⚠️ Потенциальные потери по проваленным сделкам (' + d.counts.failed + '): <b style="color:var(--amber)">' + fmt(d.lostRevenue) + '</b>';
+      html += '</div>';
+    }
+
+    html += '</div>';
+  });
+
+  document.getElementById('fin-content').innerHTML = html;
+}
+
+function renderFinCharts(byManager) {
+  // Destroy old
+  ['fin-chart-bar','fin-chart-costs'].forEach(id => {
+    const inst = Chart.getChart(id);
+    if (inst) inst.destroy();
+  });
+
+  const names = Object.keys(byManager).map(mid => (MANAGERS[mid]||'?').split(' ')[0]);
+
+  // Bar: revenue vs costs
+  const ctx1 = document.getElementById('fin-chart-bar');
+  if (ctx1) {
+    new Chart(ctx1, {
+      type: 'bar',
+      data: {
+        labels: names,
+        datasets: [
+          { label: 'Выручка', data: Object.values(byManager).map(d => Math.round(d.revenue)), backgroundColor: '#2dd4a0', borderRadius: 4 },
+          { label: 'Расходы', data: Object.values(byManager).map(d => Math.round(d.costs)), backgroundColor: '#f55353', borderRadius: 4 }
+        ]
+      },
+      options: {
+        plugins: { legend: { labels: { color: '#9896a4', font: { size: 11 } } } },
+        scales: {
+          x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9896a4' } },
+          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9896a4', callback: v => (v/1000).toFixed(0)+'к' } }
+        }
+      }
+    });
+  }
+
+  // Doughnut: costs breakdown (avg across managers)
+  const totSalary = Object.values(byManager).reduce((s,d)=>s+d.salary,0);
+  const totLeads = Object.values(byManager).reduce((s,d)=>s+d.leadCosts,0);
+  const totPts = Object.values(byManager).reduce((s,d)=>s+d.pointsSalary,0);
+
+  const ctx2 = document.getElementById('fin-chart-costs');
+  if (ctx2) {
+    new Chart(ctx2, {
+      type: 'doughnut',
+      data: {
+        labels: ['Оклады', 'Лиды', 'Баллы'],
+        datasets: [{ data: [totSalary, totLeads, totPts], backgroundColor: ['#4da3f5','#f5a623','#7c6af7'], borderWidth: 0 }]
+      },
+      options: {
+        plugins: { legend: { position: 'bottom', labels: { color: '#9896a4', padding: 10, font: { size: 11 } } } },
+        cutout: '65%'
+      }
+    });
+  }
+}
+
+function exportFinancesExcel() {
+  if (!Object.keys(FIN_DATA).length) { alert('Сначала загрузите данные'); return; }
+  var rows = [['Менеджер','Выручка','Ипотека КВ','КАСКО КВ','ОСАГО КВ','Оклад','Лиды стоимость','Баллы зарплата','Итого расходы','Маржа','Потери','Лидов куплено','Сделок успешно','Проваленных']];
+  Object.entries(FIN_DATA).forEach(function(entry) {
+    var mid = entry[0]; var d = entry[1];
+    var name = MANAGERS[mid] || mid;
+    rows.push([name, Math.round(d.revenue), Math.round(d.revenueIpoteka), Math.round(d.revenueKasko), Math.round(d.revenueOsago), d.salary, Math.round(d.leadCosts), Math.round(d.pointsSalary), Math.round(d.costs), Math.round(d.margin), Math.round(d.lostRevenue), d.counts.lids, d.counts.total, d.counts.failed]);
+  });
+  var lines = rows.map(function(r){ return r.map(function(v){ return '"'+String(v).replace(/"/g,'""')+'"'; }).join(','); });
+  var csv = '\uFEFF' + lines.join('\n');
+  var monthVal = document.getElementById('fin-month') ? (document.getElementById('fin-month').value || 'текущий') : 'текущий';
+  var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  var a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'finansy_' + monthVal + '.csv'; a.click();
 }
 
 // ===== POINTS FILTERS & CHARTS =====
@@ -2453,6 +2847,7 @@ function showPage(name) {
   if (name === 'messages') loadMessagesPage();
   if (name === 'points' && CONFIG.webhook) loadPoints();
   if (name === 'reconcile' && CONFIG.webhook && REC_ALL.length === 0) loadReconcile();
+  if (name === 'finances' && CONFIG.webhook) loadFinances();
   if (name === 'settings') {
     const whEl = document.getElementById('webhook-url');
     if (whEl) whEl.value = CONFIG.webhook || 'https://shishlov.bitrix24.ru/rest/1/0jwk0c9s8z6ohhql/';
