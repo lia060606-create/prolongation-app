@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
@@ -1076,7 +1075,9 @@ function parseDate(str) {
 
 function formatDate(d) {
   if (!d) return '—';
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const dt = (d instanceof Date) ? d : new Date(d);
+  if (isNaN(dt)) return '—';
+  return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 function daysUntil(d) {
@@ -1225,7 +1226,7 @@ async function loadDeals() {
       'CONTACT_ID','DATE_CREATE',
       FIELD_POLICY_END, FIELD_POLICY_START,
       FIELD_COMMENT_UF, FIELD_SK, FIELD_BANK, FIELD_PREMIUM,
-      FIELD_SOURCE, 'UF_CRM_1611755457413', 'SOURCE_ID', 'IS_RETURN_CUSTOMER'
+      FIELD_SOURCE, FIELD_POLICY_NUM, 'UF_CRM_1611755457413', 'SOURCE_ID', 'IS_RETURN_CUSTOMER'
     ]
   });
 
@@ -1257,6 +1258,7 @@ async function loadDeals() {
     d._bank = d[FIELD_BANK] || '';
     d._premium = d[FIELD_PREMIUM] ? parseFloat(d[FIELD_PREMIUM]) : 0;
     d._kv = parseFloat(d['UF_CRM_1611755457413'] || 0);
+    d._policyNum = (d[FIELD_POLICY_NUM] || '').toString().trim();
 
     d._daysUntil = daysUntil(policyEnd);
     d._threshold = getDaysThreshold(d._type);
@@ -1279,6 +1281,19 @@ async function loadDeals() {
     return d;
   });
 
+  // Deduplicate by policy number: if same policy number exists in current year deals → already prolonged
+  const currentYearPolicyNums = new Set(
+    ALL_DEALS
+      .filter(d => d._isCurrentYear && d._policyNum)
+      .map(d => d._policyNum)
+  );
+  ALL_DEALS.forEach(d => {
+    if (d._needsProlongation && d._policyNum && currentYearPolicyNums.has(d._policyNum)) {
+      d._alreadyProlonged = true;
+      d._needsProlongation = false;
+    }
+  });
+
   // Load managers
   try {
     const users = await bxCall('user.get', { FILTER: { ACTIVE: true } });
@@ -1290,7 +1305,7 @@ async function loadDeals() {
   // Fill manager filter
   const mf = document.getElementById('filter-manager');
   if (mf) {
-    const names = [...new Set(ALL_DEALS.map(d => MANAGERS[d.ASSIGNED_BY_ID]).filter(Boolean))];
+    const names = [...new Set(ALL_DEALS.filter(d => !EXCLUDED_USER_IDS.includes(String(d.ASSIGNED_BY_ID))).map(d => MANAGERS[d.ASSIGNED_BY_ID]).filter(Boolean))];
     mf.innerHTML = '<option value="">Все менеджеры</option>' + names.map(n => `<option value="${n}">${n}</option>`).join('');
   }
 
