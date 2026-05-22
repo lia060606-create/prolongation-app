@@ -1591,15 +1591,25 @@ async function loadPoints() {
 
           if (lifeDeals.length > 0 && propDeals.length > 0) {
             // Paired жизнь+имущество
-            const res = calcIpotekaPoints(totalSum, true, true, d._isProl);
-            group[0]._points = res.points;
-            group[0]._pointsNote = res.note + ' (пара)';
-            group[0]._isPaired = true;
-            for (let i = 1; i < group.length; i++) {
-              group[i]._points = 0;
-              group[i]._pointsNote = 'учтено в паре';
-              group[i]._isPaired = true;
-              group[i]._pairRef = group[0].TITLE;
+            if (d._isProl && totalSum <= 4000) {
+              // Сумма пары ≤ 4000 — считаем каждую сделку отдельно по правилу > 1500
+              group.forEach(x => {
+                const xSum = parseFloat(x.OPPORTUNITY) || 0;
+                x._points = xSum > 1500 ? 1 : 0;
+                x._pointsNote = xSum > 1500 ? 'Прол: пара ≤ 4000, ' + (x._isLife ? 'жизнь' : 'имущество') + ' > 1500 ₽' : 'Прол: пара ≤ 4000, ≤ 1500 ₽';
+                x._isPaired = false;
+              });
+            } else {
+              const res = calcIpotekaPoints(totalSum, true, true, d._isProl);
+              group[0]._points = res.points;
+              group[0]._pointsNote = res.note + ' (пара)';
+              group[0]._isPaired = true;
+              for (let i = 1; i < group.length; i++) {
+                group[i]._points = 0;
+                group[i]._pointsNote = 'учтено в паре';
+                group[i]._isPaired = true;
+                group[i]._pairRef = group[0].TITLE;
+              }
             }
           } else {
             // Multiple same-type deals — calc each individually
@@ -1652,8 +1662,13 @@ function calcIpotekaPoints(sum, isLife, isProperty, isProl) {
   } else {
     // Пролонгация
     if (isLife && isProperty) {
+      // Пара: если сумма > 4000 → 2 балла суммарно
+      // Если ≤ 4000 → считаем как непарные (каждая по правилу > 1500)
       if (sum > 4000) return { points: 2, note: 'Прол: жизнь+имущество > 4000 ₽' };
-      return { points: 0, note: 'Прол: жизнь+имущество ≤ 4000 ₽' };
+      // Сумма ≤ 4000 — оба полиса дешёвые, считаем каждый отдельно
+      // Возвращаем для текущего полиса (isLife или isProperty)
+      // Логика вызывается с суммой одного полиса в этом случае — handled in loadPoints
+      return { points: sum > 1500 ? 1 : 0, note: 'Прол: пара ≤ 4000, индив. > 1500?' };
     }
     if (isLife)     return sum > 1500 ? { points: 1, note: 'Прол: жизнь > 1500 ₽' } : { points: 0, note: 'Прол: жизнь ≤ 1500 ₽' };
     if (isProperty) return sum > 1500 ? { points: 1, note: 'Прол: имущество > 1500 ₽' } : { points: 0, note: 'Прол: имущество ≤ 1500 ₽' };
@@ -1761,7 +1776,14 @@ function calcPoints(deal) {
     return calcIpotekaPoints(sum, isLife, isProperty, isProl);
   }
 
-  return { points: 0, note: 'Прочее' };
+  if (type === 'ПРОЧЕЕ') {
+    // Метражи, ККФ, Антириск и др.: >= 3500 = 1 балл, < 3500 = 0.5 балла
+    if (sum >= 3500) return { points: 1, note: 'Прочее ≥ 3500' };
+    if (sum > 0)     return { points: 0.5, note: 'Прочее < 3500' };
+    return { points: 0, note: 'Прочее (0 руб)' };
+  }
+
+  return { points: 0, note: 'Не определён' };
 }
 
 function calcSalaryFromPoints(points) {
