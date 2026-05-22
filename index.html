@@ -544,7 +544,7 @@
 
         <div class="field-group">
           <label class="field-label">URL вебхука</label>
-          <input type="url" id="webhook-url" placeholder="https://shishlov.bitrix24.ru/rest/1/xxxx/" />
+          <input type="text" id="webhook-url" placeholder="https://shishlov.bitrix24.ru/rest/1/xxxx/" value="https://shishlov.bitrix24.ru/rest/1/0jwk0c9s8z6ohhql/" />
         </div>
 
         <div class="field-group">
@@ -894,8 +894,9 @@ function saveSettings() {
   CONFIG.sheetsKey = sk ? sk.value.trim() : '';
   if (CONFIG.webhook && !CONFIG.webhook.endsWith('/')) CONFIG.webhook += '/';
   try { localStorage.setItem('prolong_config', JSON.stringify(CONFIG)); } catch(e) {}
-  showMsg('settings-msg', 'success', '✓ Настройки сохранены');
+  showMsg('settings-msg', 'success', '✓ Сохранено! Переходим на дашборд...');
   updateConnectionStatus();
+  setTimeout(() => { showPage('dashboard'); loadDashboard(); }, 800);
 }
 
 function updateConnectionStatus() {
@@ -2454,7 +2455,8 @@ function showPage(name) {
   if (name === 'points' && CONFIG.webhook) loadPoints();
   if (name === 'reconcile' && CONFIG.webhook && REC_ALL.length === 0) loadReconcile();
   if (name === 'settings') {
-    document.getElementById('webhook-url').value = CONFIG.webhook;
+    const whEl = document.getElementById('webhook-url');
+    if (whEl) whEl.value = CONFIG.webhook || 'https://shishlov.bitrix24.ru/rest/1/0jwk0c9s8z6ohhql/';
     document.getElementById('sheets-id').value = CONFIG.sheetsId;
     document.getElementById('sheets-key').value = CONFIG.sheetsKey;
   }
