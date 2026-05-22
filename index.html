@@ -969,9 +969,9 @@ function daysUntil(d) {
 function getDaysThreshold(type) {
   if (!type) return 45;
   const t = type.toUpperCase();
-  if (t.includes('ИПОТЕКА')) return 60;
-  if (t.includes('ОСАГО')) return 30;
-  return 45;
+  if (t === 'ИПОТЕКА') return 60;
+  if (t === 'ОСАГО') return 30;
+  return 45; // КАСКО, КАСКО_ЛИД, ПРОЧЕЕ
 }
 
 // ===== FIO PARSING =====
@@ -1006,14 +1006,17 @@ function capitalize(str) {
 
 // ===== PIPELINE TYPE =====
 function getPipelineType(deal) {
-  // Check category/pipeline name
-  const cat = (deal.CATEGORY_NAME || deal.CATEGORY_ID || '').toString().toUpperCase();
-  const title = (deal.TITLE || '').toUpperCase();
-  if (cat.includes('ИПОТЕКА') || title.includes('ИПОТЕКА')) return 'ИПОТЕКА';
-  if (cat.includes('КАСКО_ЛИД') || cat.includes('КАСКО ЛИД')) return 'КАСКО_ЛИД';
-  if (cat.includes('КАСКО')) return 'КАСКО';
-  if (cat.includes('ОСАГО')) return 'ОСАГО';
-  return 'ПРОЧЕЕ';
+  // Category IDs: 1=ИПОТЕКА, 3=КАСКО, 5=ПРОЧЕЕ, 7=КАСКО_ЛИД, 0=ОСАГО (default pipeline)
+  const catId = String(deal.CATEGORY_ID || '0');
+  if (catId === '1') return 'ИПОТЕКА';
+  if (catId === '3') return 'КАСКО';
+  if (catId === '7') return 'КАСКО_ЛИД';
+  if (catId === '5') return 'ПРОЧЕЕ';
+  // catId === '0': default pipeline = ОСАГО (or other)
+  // Check title for КАСКО just in case
+  const title = (deal.TITLE || '').toLowerCase();
+  if (title.includes('каско')) return 'КАСКО';
+  return 'ОСАГО';
 }
 
 function getBadgeClass(type) {
@@ -1022,6 +1025,7 @@ function getBadgeClass(type) {
   if (t === 'КАСКО') return 'badge-kasko';
   if (t === 'КАСКО_ЛИД') return 'badge-kasko_lid';
   if (t === 'ОСАГО') return 'badge-osago';
+  if (t === 'ПРОЧЕЕ') return 'badge-prochee';
   return 'badge-prochee';
 }
 
@@ -1732,47 +1736,7 @@ function calcOsagoPoints(sum, kvPct) {
   return result;
 }
 
-function calcPoints(deal) {
-  const type = deal._type;
-  const sum = parseFloat(deal.OPPORTUNITY) || 0;
-  // UF_CRM_1611755457413 = КВ% (вариант полиса): 15 для ОСАГО, 50 для ипотеки и т.д.
-  const kvPct = parseFloat(deal['UF_CRM_1611755457413'] || 0);
-  const title = (deal.TITLE || '').toLowerCase();
-
-  if (type === 'ОСАГО') {
-    const pts = calcOsagoPoints(sum, kvPct);
-    return { points: pts, note: kvPct ? `КВ ${kvPct}%` : '⚠ нет КВ' };
-  }
-
-  if (type === 'КАСКО' || type === 'КАСКО_ЛИД') {
-    if (sum < 20000) return { points: 1, note: '< 20 000' };
-    return { points: 3, note: '≥ 20 000 → 3+ балла' };
-  }
-
-  if (type === 'ИПОТЕКА') {
-    const isLife     = title.includes('жизн') || title.includes('ж ') || title.endsWith(' ж') || title.includes(' жз') || title.includes('life');
-    const isProperty = title.includes('дом') || title.includes('кварт') || title.includes('имущ') || title.includes(' д') || title.includes('апарт');
-    const isProl     = title.includes('повтор') || title.includes('прол') || deal.SOURCE_ID === 'REPEAT_SALE' || deal.IS_RETURN_CUSTOMER === 'Y';
-
-    if (!isProl) {
-      // Новая сделка
-      if (isLife && isProperty) return { points: 2, note: 'Новая: жизнь+имущество' };
-      if (isLife)               return { points: 1, note: 'Новая: только жизнь' };
-      if (isProperty)           return { points: 0.5, note: 'Новая: только имущество' };
-      return { points: 0, note: '⚠ не определён тип' };
-    } else {
-      // Пролонгация
-      if (isLife && isProperty && sum > 4000) return { points: 2, note: 'Прол: жизнь+имущество > 4000' };
-      if (isLife && sum > 1500)               return { points: 1, note: 'Прол: жизнь > 1500' };
-      if (isProperty && sum > 1500)           return { points: 1, note: 'Прол: имущество > 1500' };
-      if (isLife && sum <= 1500)              return { points: 0, note: 'Прол: жизнь ≤ 1500' };
-      if (isProperty && sum <= 1500)          return { points: 0, note: 'Прол: имущество ≤ 1500' };
-      return { points: 0, note: '⚠ сумма мала' };
-    }
-  }
-
-  return { points: 0, note: 'Прочее' };
-}
+// calcPoints defined above
 
 function calcSalaryFromPoints(points) {
   const tiers = [[76,400],[66,350],[56,300],[46,200],[36,100]];
@@ -1854,7 +1818,7 @@ function renderPoints(byManager, dateFrom) {
     ).join(' ');
 
     // Deals sorted by date desc, flag zero-point deals
-    const sorted = [...data.deals].sort((a,b) => new Date(b.CLOSEDATE) - new Date(a.CLOSEDATE));
+    const sorted = [...data.deals].sort((a,b) => new Date(a.CLOSEDATE) - new Date(b.CLOSEDATE));
     const zeroCount = sorted.filter(d => d._points === 0).length;
 
     detailHtml += `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px">
