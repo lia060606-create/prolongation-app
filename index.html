@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
@@ -618,29 +617,40 @@
       <div class="page-header">
         <div>
           <div class="page-title">Пролонгации</div>
-          <div class="page-desc">Сделки, требующие пролонгации в ближайшие дни</div>
+          <div class="page-desc" id="prol-desc">Сделки, у которых полис заканчивается сегодня (по порогу)</div>
         </div>
         <div class="header-actions">
-          <select class="filter-select" id="filter-type" onchange="filterDeals()">
-            <option value="">Все воронки</option>
-            <option value="ИПОТЕКА">Ипотека</option>
-            <option value="КАСКО">КАСКО</option>
-            <option value="КАСКО_ЛИД">КАСКО ЛИД</option>
-            <option value="ОСАГО">ОСАГО</option>
-            <option value="ПРОЧЕЕ">Прочее</option>
-          </select>
-          <select class="filter-select" id="filter-manager" onchange="filterDeals()">
-            <option value="">Все менеджеры</option>
-          </select>
-          <button class="btn btn-primary btn-sm" onclick="runProlongation()">▶ Запустить</button>
+          <button class="btn btn-primary btn-sm" onclick="runProlongation()">▶ Создать все</button>
         </div>
+      </div>
+
+      <!-- PERIOD FILTERS -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center">
+        <div style="display:flex;gap:4px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:4px">
+          <button class="btn btn-sm" id="pf-today" onclick="setProlPeriod('today')" style="background:var(--accent);color:#fff">Сегодня</button>
+          <button class="btn btn-sm" id="pf-3days" onclick="setProlPeriod('3days')" style="background:transparent;color:var(--text2)">+3 дня</button>
+          <button class="btn btn-sm" id="pf-week" onclick="setProlPeriod('week')" style="background:transparent;color:var(--text2)">Неделя</button>
+          <button class="btn btn-sm" id="pf-month" onclick="setProlPeriod('month')" style="background:transparent;color:var(--text2)">Месяц</button>
+        </div>
+        <select class="filter-select" id="filter-type" onchange="filterDeals()">
+          <option value="">Все воронки</option>
+          <option value="ИПОТЕКА">Ипотека</option>
+          <option value="КАСКО">КАСКО</option>
+          <option value="КАСКО_ЛИД">КАСКО ЛИД</option>
+          <option value="ОСАГО">ОСАГО</option>
+          <option value="ПРОЧЕЕ">Прочее</option>
+        </select>
+        <select class="filter-select" id="filter-manager" onchange="filterDeals()">
+          <option value="">Все менеджеры</option>
+        </select>
+        <span id="prol-count" style="font-size:12px;color:var(--text3)"></span>
       </div>
 
       <div id="deals-content">
         <div class="empty-state">
           <div class="empty-icon">🔄</div>
           <div class="empty-title">Загрузка сделок...</div>
-          <div class="empty-sub">Нажмите «Загрузить» или дождитесь автообновления</div>
+          <div class="empty-sub">Дождитесь загрузки данных</div>
         </div>
       </div>
     </div>
@@ -1250,27 +1260,22 @@ async function loadDeals() {
     d._daysUntil = daysUntil(policyEnd);
     d._threshold = getDaysThreshold(d._type);
     d._source = (d[FIELD_SOURCE] || '').toString();
+    d._isProlongationDeal = d._source === SOURCE_PROLONGATION || d._source === '80';
     const createYear = d.DATE_CREATE ? new Date(d.DATE_CREATE).getFullYear() : 0;
-    d._isCurrentYear = createYear === new Date().getFullYear();
-    // Only show deals NOT created this year (prev years need prolongation)
+    const curYear = new Date().getFullYear();
+    d._isCurrentYear = createYear === curYear;
+    // Created before 2025 = too old, skip
+    const d_createYear = d.DATE_CREATE ? new Date(d.DATE_CREATE).getFullYear() : 0;
+    d._isTooOld = d_createYear > 0 && d_createYear < 2025;
+    // Needs prolongation: has policy end date, within threshold, not too old,
+    // and is NOT itself a prolongation deal created this year
     d._needsProlongation = policyEnd
       && d._daysUntil !== null
       && d._daysUntil >= 0
       && d._daysUntil <= d._threshold
-      && !d._isCurrentYear;
+      && !d._isTooOld
+      && !(d._isCurrentYear && d._isProlongationDeal);
     return d;
-  });
-
-  // Exclude deals where prolongation already exists this year (same contact+category)
-  const alreadyProlonged = new Set();
-  ALL_DEALS.filter(d => d._isCurrentYear && d.CONTACT_ID).forEach(d => {
-    alreadyProlonged.add(d.CONTACT_ID + '_' + d.CATEGORY_ID);
-  });
-  ALL_DEALS.forEach(d => {
-    if (d._needsProlongation && d.CONTACT_ID && alreadyProlonged.has(d.CONTACT_ID + '_' + d.CATEGORY_ID)) {
-      d._alreadyProlonged = true;
-      d._needsProlongation = false;
-    }
   });
 
   // Load managers
@@ -1505,15 +1510,67 @@ function buildMessage(deal) {
 }
 
 // ===== DEALS TABLE =====
+let PROL_PERIOD = 'today'; // today, 3days, week, month
+
+function setProlPeriod(period) {
+  PROL_PERIOD = period;
+  // Update button styles
+  ['today','3days','week','month'].forEach(p => {
+    const btn = document.getElementById('pf-' + p);
+    if (btn) {
+      btn.style.background = p === period ? 'var(--accent)' : 'transparent';
+      btn.style.color = p === period ? '#fff' : 'var(--text2)';
+    }
+  });
+  filterDeals();
+}
+
+function getProlPeriodRange() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  switch(PROL_PERIOD) {
+    case 'today':  return { min: 0, max: 0 };
+    case '3days':  return { min: 0, max: 3 };
+    case 'week':   return { min: 0, max: 7 };
+    case 'month':  return { min: 0, max: 30 };
+    default:       return { min: 0, max: 0 };
+  }
+}
+
+function getProlPeriodLabel() {
+  switch(PROL_PERIOD) {
+    case 'today':  return 'сегодня (ровно по порогу)';
+    case '3days':  return 'в ближайшие 3 дня';
+    case 'week':   return 'в ближайшую неделю';
+    case 'month':  return 'в ближайший месяц';
+    default:       return '';
+  }
+}
+
 function filterDeals() {
   const typeF = document.getElementById('filter-type').value;
   const mgrF = document.getElementById('filter-manager').value;
+  const range = getProlPeriodRange();
 
-  let list = ALL_DEALS.filter(d => d._needsProlongation);
+  let list = ALL_DEALS.filter(d => {
+    if (!d._needsProlongation) return false;
+    // For "today" mode: show deals where daysUntil equals threshold exactly (±2 days)
+    if (PROL_PERIOD === 'today') {
+      const slack = 2;
+      return d._daysUntil >= (d._threshold - slack) && d._daysUntil <= d._threshold;
+    }
+    // For other periods: show all within range
+    return d._daysUntil >= range.min && d._daysUntil <= range.max;
+  });
+
   if (typeF) list = list.filter(d => d._type === typeF);
   if (mgrF) list = list.filter(d => MANAGERS[d.ASSIGNED_BY_ID] === mgrF);
 
   FILTERED_DEALS = list;
+  // Update desc and count
+  const descEl = document.getElementById('prol-desc');
+  if (descEl) descEl.textContent = 'Полис заканчивается ' + getProlPeriodLabel();
+  const countEl = document.getElementById('prol-count');
+  if (countEl) countEl.textContent = list.length + ' сделок';
   renderDealsTable();
 }
 
