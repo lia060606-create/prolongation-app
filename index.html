@@ -482,6 +482,7 @@
   }
 </style>
 <script src="//api.bitrix24.com/api/v1/"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
 <div class="app">
@@ -686,28 +687,67 @@
       <div class="page-header">
         <div>
           <div class="page-title">Контроль баллов</div>
-          <div class="page-desc">Расчёт баллов по системе мотивации (с 01.09.2025)</div>
+          <div class="page-desc">Расчёт по системе мотивации (с 01.09.2025)</div>
         </div>
         <div class="header-actions">
           <select class="filter-select" id="points-month" onchange="loadPoints()">
             <option value="">Текущий месяц</option>
           </select>
           <button class="btn btn-secondary btn-sm" onclick="loadPoints()">🔄 Обновить</button>
+          <button class="btn btn-secondary btn-sm" onclick="exportPointsExcel()">📥 Excel</button>
+          <button class="btn btn-secondary btn-sm" onclick="exportPointsPDF()">📄 PDF</button>
         </div>
       </div>
 
-      <div class="alert alert-info" style="max-width:700px">
-        <div class="alert-icon">ℹ️</div>
-        <div class="alert-body">
-          <div class="alert-text">Баллы рассчитываются автоматически по успешно закрытым сделкам за месяц. Сравните с тем, что вбили менеджеры в реестр.</div>
+      <!-- FILTERS -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center">
+        <select class="filter-select" id="pf-manager" onchange="applyPointsFilters()">
+          <option value="">Все менеджеры</option>
+        </select>
+        <select class="filter-select" id="pf-type" onchange="applyPointsFilters()">
+          <option value="">Все воронки</option>
+          <option value="ИПОТЕКА">Ипотека</option>
+          <option value="ОСАГО">ОСАГО</option>
+          <option value="КАСКО">КАСКО</option>
+          <option value="КАСКО_ЛИД">КАСКО ЛИД</option>
+          <option value="ПРОЧЕЕ">Прочее</option>
+        </select>
+        <select class="filter-select" id="pf-prol" onchange="applyPointsFilters()">
+          <option value="">Все сделки</option>
+          <option value="prol">Только пролонгации</option>
+          <option value="new">Только новые</option>
+        </select>
+        <select class="filter-select" id="pf-zero" onchange="applyPointsFilters()">
+          <option value="">Все баллы</option>
+          <option value="nonzero">Только с баллами</option>
+          <option value="zero">Только нулевые</option>
+        </select>
+        <input type="text" id="pf-search" placeholder="Поиск по ФИО..." style="width:180px;padding:6px 10px;font-size:12px" oninput="applyPointsFilters()">
+        <button class="btn btn-secondary btn-sm" onclick="resetPointsFilters()">✕ Сбросить</button>
+      </div>
+
+      <!-- CHARTS ROW -->
+      <div id="points-charts" style="display:none;margin-bottom:24px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius2);padding:20px">
+            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:16px;text-transform:uppercase;letter-spacing:0.5px">Баллы по менеджерам</div>
+            <canvas id="chart-managers" height="200"></canvas>
+          </div>
+          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius2);padding:20px">
+            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:16px;text-transform:uppercase;letter-spacing:0.5px">Структура по продуктам</div>
+            <canvas id="chart-types" height="200"></canvas>
+          </div>
+          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius2);padding:20px">
+            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:16px;text-transform:uppercase;letter-spacing:0.5px">Новые vs Пролонгации</div>
+            <canvas id="chart-newvsprol" height="200"></canvas>
+          </div>
         </div>
       </div>
 
       <div id="points-content">
         <div class="empty-state">
           <div class="empty-icon">⭐</div>
-          <div class="empty-title">Настройте подключение</div>
-          <div class="empty-sub">Для расчёта баллов нужен webhook Битрикс24</div>
+          <div class="empty-title">Выберите месяц и нажмите Обновить</div>
         </div>
       </div>
     </div>
@@ -1646,7 +1686,12 @@ async function loadPoints() {
       byManager[mid].total += d._points || 0;
     });
 
+    // Store globally for filters
+    POINTS_RAW = byManager;
+    POINTS_ALL_DEALS = filtered;
+    populatePointsManagerFilter(byManager);
     renderPoints(byManager, dateFrom);
+    renderCharts(byManager);
   } catch(e) {
     document.getElementById('points-content').innerHTML = `<div class="alert alert-err"><div class="alert-icon">✗</div><div class="alert-body"><div class="alert-title">Ошибка</div><div class="alert-text">${e.message}</div></div></div>`;
   }
@@ -1812,11 +1857,11 @@ const MANAGER_COLORS = [
 
 function renderPoints(byManager, dateFrom) {
   if (!Object.keys(byManager).length) {
-    document.getElementById('points-content').innerHTML = `<div class="empty-state"><div class="empty-icon">⭐</div><div class="empty-title">Нет закрытых сделок за этот период</div></div>`;
+    document.getElementById('points-content').innerHTML = '<div class="empty-state"><div class="empty-icon">⭐</div><div class="empty-title">Нет сделок по выбранным фильтрам</div></div>';
     return;
   }
 
-  const monthStr = dateFrom.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+  const monthStr = dateFrom ? dateFrom.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }) : '';
 
   // Summary row across all managers
   const allManagers = Object.entries(byManager);
@@ -2181,6 +2226,213 @@ function renderReconcile() {
   html += '</tbody></table></div>';
   document.getElementById('rec-content').innerHTML = html;
   addLog('warn', `Сверка завершена: ${missing.length} сделок без пролонгации из ${total}`);
+}
+
+// ===== POINTS FILTERS & CHARTS =====
+let POINTS_RAW = {};      // raw byManager data from loadPoints
+let POINTS_ALL_DEALS = []; // flat list of all deals with manager name
+let CHARTS = {};           // Chart.js instances
+
+function populatePointsManagerFilter(byManager) {
+  const sel = document.getElementById('pf-manager');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Все менеджеры</option>';
+  Object.keys(byManager).forEach(mid => {
+    const name = MANAGERS[mid] || 'Менеджер';
+    const opt = document.createElement('option');
+    opt.value = mid;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  });
+  if (current) sel.value = current;
+}
+
+function resetPointsFilters() {
+  ['pf-manager','pf-type','pf-prol','pf-zero'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const s = document.getElementById('pf-search');
+  if (s) s.value = '';
+  applyPointsFilters();
+}
+
+function applyPointsFilters() {
+  const mgrF  = document.getElementById('pf-manager')?.value || '';
+  const typeF = document.getElementById('pf-type')?.value || '';
+  const prolF = document.getElementById('pf-prol')?.value || '';
+  const zeroF = document.getElementById('pf-zero')?.value || '';
+  const srchF = (document.getElementById('pf-search')?.value || '').toLowerCase();
+
+  // Filter flat deals list
+  let filtered = POINTS_ALL_DEALS.filter(d => {
+    if (mgrF  && d.ASSIGNED_BY_ID !== mgrF) return false;
+    if (typeF && d._type !== typeF) return false;
+    if (prolF === 'prol' && !d._isProl) return false;
+    if (prolF === 'new'  && d._isProl) return false;
+    if (zeroF === 'nonzero' && (d._points||0) === 0) return false;
+    if (zeroF === 'zero'    && (d._points||0) > 0) return false;
+    if (srchF && !(d.TITLE||'').toLowerCase().includes(srchF)) return false;
+    return true;
+  });
+
+  // Rebuild byManager from filtered
+  const byMgr = {};
+  filtered.forEach(d => {
+    const mid = d.ASSIGNED_BY_ID;
+    if (!byMgr[mid]) byMgr[mid] = { deals: [], total: 0 };
+    byMgr[mid].deals.push(d);
+    byMgr[mid].total += d._points || 0;
+  });
+
+  renderPoints(byMgr, null);
+  renderCharts(byMgr);
+}
+
+function renderCharts(byManager) {
+  const chartsEl = document.getElementById('points-charts');
+  if (!chartsEl) return;
+  chartsEl.style.display = 'block';
+
+  // Destroy old charts
+  Object.values(CHARTS).forEach(c => { try { c.destroy(); } catch(e) {} });
+  CHARTS = {};
+
+  const managerNames = Object.keys(byManager).map(mid => (MANAGERS[mid]||'?').split(' ')[0]);
+  const managerTotals = Object.values(byManager).map(d => +d.total.toFixed(1));
+  const colors = ['#7c6af7','#2dd4a0','#4da3f5','#f5a623','#f55353'];
+
+  // Chart 1: Баллы по менеджерам (bar)
+  const ctx1 = document.getElementById('chart-managers');
+  if (ctx1) {
+    CHARTS.managers = new Chart(ctx1, {
+      type: 'bar',
+      data: {
+        labels: managerNames,
+        datasets: [{ data: managerTotals, backgroundColor: colors, borderRadius: 6, borderSkipped: false }]
+      },
+      options: {
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9896a4' } },
+          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9896a4' } }
+        }
+      }
+    });
+  }
+
+  // Chart 2: Структура по продуктам (doughnut)
+  const typePoints = {};
+  POINTS_ALL_DEALS.forEach(d => {
+    if (!Object.keys(byManager).includes(d.ASSIGNED_BY_ID)) return;
+    typePoints[d._type] = (typePoints[d._type]||0) + (d._points||0);
+  });
+  const typeLabels = Object.keys(typePoints);
+  const typeData = typeLabels.map(t => +typePoints[t].toFixed(1));
+  const typeColors = { ИПОТЕКА: '#4da3f5', ОСАГО: '#2dd4a0', КАСКО: '#7c6af7', КАСКО_ЛИД: '#f5a623', ПРОЧЕЕ: '#9896a4' };
+
+  const ctx2 = document.getElementById('chart-types');
+  if (ctx2 && typeLabels.length) {
+    CHARTS.types = new Chart(ctx2, {
+      type: 'doughnut',
+      data: {
+        labels: typeLabels,
+        datasets: [{ data: typeData, backgroundColor: typeLabels.map(t => typeColors[t]||'#555'), borderWidth: 0 }]
+      },
+      options: {
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#9896a4', padding: 10, font: { size: 11 } } }
+        },
+        cutout: '65%'
+      }
+    });
+  }
+
+  // Chart 3: Новые vs Пролонгации (stacked bar)
+  const newPts = {}, prolPts = {};
+  Object.keys(byManager).forEach(mid => {
+    newPts[mid] = 0; prolPts[mid] = 0;
+    byManager[mid].deals.forEach(d => {
+      if (d._isProl) prolPts[mid] += d._points||0;
+      else newPts[mid] += d._points||0;
+    });
+  });
+
+  const ctx3 = document.getElementById('chart-newvsprol');
+  if (ctx3) {
+    CHARTS.newvsprol = new Chart(ctx3, {
+      type: 'bar',
+      data: {
+        labels: managerNames,
+        datasets: [
+          { label: 'Новые', data: Object.keys(byManager).map(m => +newPts[m].toFixed(1)), backgroundColor: '#4da3f5', borderRadius: 4 },
+          { label: 'Пролонгации', data: Object.keys(byManager).map(m => +prolPts[m].toFixed(1)), backgroundColor: '#7c6af7', borderRadius: 4 }
+        ]
+      },
+      options: {
+        plugins: { legend: { labels: { color: '#9896a4', font: { size: 11 } } } },
+        scales: {
+          x: { stacked: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9896a4' } },
+          y: { stacked: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9896a4' } }
+        }
+      }
+    });
+  }
+}
+
+function exportPointsExcel() {
+  if (!POINTS_ALL_DEALS.length) { alert('Сначала загрузите данные'); return; }
+  const mgrF = document.getElementById('pf-manager')?.value || '';
+  const rows = [['Менеджер','ФИО клиента','Тип','Сумма','Новая/Прол','Расчёт','Баллы']];
+  POINTS_ALL_DEALS.filter(d => !mgrF || d.ASSIGNED_BY_ID === mgrF).forEach(d => {
+    rows.push([
+      (MANAGERS[d.ASSIGNED_BY_ID]||'—'),
+      d.TITLE,
+      d._type,
+      parseFloat(d.OPPORTUNITY||0).toFixed(2),
+      d._isProl ? 'Пролонгация' : 'Новая',
+      d._pointsNote||'',
+      (d._points||0).toFixed(1)
+    ]);
+  });
+  let csv = '﻿' + rows.map(r => r.map(v => '"' + String(v).replace(/"/g,'""') + '"').join(',')).join('
+');
+  const monthVal = document.getElementById('points-month')?.value || 'текущий';
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'баллы_' + monthVal + '.csv';
+  a.click();
+}
+
+function exportPointsPDF() {
+  const el = document.getElementById('points-content');
+  if (!el) return;
+  // Simple print-based PDF
+  const w = window.open('', '_blank');
+  w.document.write('<html><head><title>Баллы</title><style>body{font-family:Arial,sans-serif;font-size:12px;color:#000}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:4px 8px;text-align:left}th{background:#f0f0f0}h3{margin:16px 0 8px}</style></head><body>');
+  w.document.write('<h2>Контроль баллов</h2>');
+  // Render simplified table
+  const byMgr = {};
+  POINTS_ALL_DEALS.forEach(d => {
+    const mid = d.ASSIGNED_BY_ID;
+    if (!byMgr[mid]) byMgr[mid] = [];
+    byMgr[mid].push(d);
+  });
+  Object.entries(byMgr).forEach(([mid, deals]) => {
+    const name = MANAGERS[mid] || 'Менеджер';
+    const total = deals.reduce((s,d) => s+(d._points||0),0);
+    w.document.write('<h3>' + name + ' — ' + total.toFixed(1) + ' баллов</h3>');
+    w.document.write('<table><tr><th>ФИО</th><th>Тип</th><th>Сумма</th><th>Расчёт</th><th>Баллы</th></tr>');
+    deals.forEach(d => {
+      w.document.write('<tr><td>' + d.TITLE + '</td><td>' + d._type + '</td><td>' + parseFloat(d.OPPORTUNITY||0).toFixed(0) + ' ₽</td><td>' + (d._pointsNote||'') + '</td><td><b>' + (d._points||0).toFixed(1) + '</b></td></tr>');
+    });
+    w.document.write('</table>');
+  });
+  w.document.write('</body></html>');
+  w.document.close();
+  w.print();
 }
 
 // ===== NAVIGATION =====
