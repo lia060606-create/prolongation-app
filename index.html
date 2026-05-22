@@ -1082,8 +1082,10 @@ function formatDate(d) {
 
 function daysUntil(d) {
   if (!d) return null;
+  const dt = (d instanceof Date) ? d : new Date(d);
+  if (isNaN(dt)) return null;
   const now = new Date(); now.setHours(0,0,0,0);
-  const diff = d - now;
+  const diff = dt - now;
   return Math.ceil(diff / 86400000);
 }
 
@@ -1234,14 +1236,14 @@ async function loadDeals() {
     d.CATEGORY_NAME = catMap[d.CATEGORY_ID] || ('Воронка ' + d.CATEGORY_ID);
     d._type = getPipelineType(d);
 
-    // Policy end date — use exact field
+    // Policy end date — use exact field, always store as Date object
     const rawEnd = d[FIELD_POLICY_END];
     let policyEnd = null;
     if (rawEnd) {
       const pd = new Date(rawEnd);
       if (!isNaN(pd)) policyEnd = pd;
     }
-    d._policyEnd = policyEnd;
+    d._policyEnd = policyEnd; // always Date or null
     d._policyEndField = FIELD_POLICY_END;
 
     // Policy start date
@@ -1428,7 +1430,7 @@ async function createProlongationDeal(sourceDeal) {
     [FIELD_SOURCE]: SOURCE_PROLONGATION,
     UF_CRM_SOURCE_DEAL: sourceDeal.ID,
     // Copy policy end date field
-    [sourceDeal._policyEndField || 'UF_CRM_DATE_END']: sourceDeal._policyEnd ? sourceDeal._policyEnd.toISOString().split('T')[0] : ''
+    [sourceDeal._policyEndField || FIELD_POLICY_END]: sourceDeal._policyEnd ? (new Date(sourceDeal._policyEnd)).toISOString().split('T')[0] : ''
   };
 
   const newDealId = await bxCall('crm.deal.add', { fields: newDeal });
