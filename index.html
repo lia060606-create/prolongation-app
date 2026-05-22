@@ -846,7 +846,7 @@
 <script>
 // ===== STATE =====
 let CONFIG = {
-  webhook: 'https://shishlov.bitrix24.ru/rest/1/0jwk0c9s8z6ohhql/',
+  webhook: 'https://shishlov.bitrix24.ru/rest/1/0jwk0c9s8z6ohhql/', // hardcoded
   sheetsId: '',
   sheetsKey: ''
 };
@@ -868,13 +868,9 @@ function init() {
     });
     return;
   }
-  // Standalone mode — use webhook
-  if (CONFIG.webhook) {
-    showPage('dashboard');
-    loadDashboard();
-  } else {
-    showPage('settings');
-  }
+  // Always go to dashboard — webhook is hardcoded
+  showPage('dashboard');
+  loadDashboard();
 }
 
 function loadConfig() {
@@ -882,15 +878,22 @@ function loadConfig() {
     const saved = localStorage.getItem('prolong_config');
     if (saved) CONFIG = { ...CONFIG, ...JSON.parse(saved) };
   } catch(e) {}
+  // Always ensure hardcoded webhook is set
+  if (!CONFIG.webhook) {
+    CONFIG.webhook = 'https://shishlov.bitrix24.ru/rest/1/0jwk0c9s8z6ohhql/';
+  }
   updateConnectionStatus();
 }
 
 function saveSettings() {
-  CONFIG.webhook = document.getElementById('webhook-url').value.trim();
-  CONFIG.sheetsId = document.getElementById('sheets-id').value.trim();
-  CONFIG.sheetsKey = document.getElementById('sheets-key').value.trim();
-  if (!CONFIG.webhook.endsWith('/')) CONFIG.webhook += '/';
-  localStorage.setItem('prolong_config', JSON.stringify(CONFIG));
+  const wh = document.getElementById('webhook-url');
+  const si = document.getElementById('sheets-id');
+  const sk = document.getElementById('sheets-key');
+  CONFIG.webhook = (wh ? wh.value.trim() : CONFIG.webhook) || 'https://shishlov.bitrix24.ru/rest/1/0jwk0c9s8z6ohhql/';
+  CONFIG.sheetsId = si ? si.value.trim() : '';
+  CONFIG.sheetsKey = sk ? sk.value.trim() : '';
+  if (CONFIG.webhook && !CONFIG.webhook.endsWith('/')) CONFIG.webhook += '/';
+  try { localStorage.setItem('prolong_config', JSON.stringify(CONFIG)); } catch(e) {}
   showMsg('settings-msg', 'success', '✓ Настройки сохранены');
   updateConnectionStatus();
 }
