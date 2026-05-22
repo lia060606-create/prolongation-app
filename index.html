@@ -1671,8 +1671,8 @@ async function loadPoints() {
     // Detect life/property for each deal
     filtered.forEach(d => {
       const t = (d.TITLE||'').toLowerCase();
-      d._isLife = /жизн|жизь|ж|жз|life|нс/.test(t);
-      d._isProperty = /дом|кварт|имущ|д|апарт|комнат/.test(t);
+      d._isLife = /жизн|жизь|\bж\b|жз|\blife\b|\bнс\b/.test(t);
+      d._isProperty = /\bдом\b|кварт|имущ|\bд\b|апарт|комнат/.test(t);
       // If neither detected, try to infer from premium fields
       if (!d._isLife && !d._isProperty) {
         const premLife = parseFloat((d['UF_CRM_1621248599553']||'').split('|')[0]) || 0;
@@ -2401,8 +2401,8 @@ async function loadFinances() {
       wonDeals.forEach(d => {
         d._type2 = getPipelineType(d);
         const title = (d.TITLE||'').toLowerCase();
-        d._isLife = /жизн|жизь|ж|жз|life|нс/.test(title);
-        d._isProperty = /дом|кварт|имущ|д|апарт|комнат/.test(title);
+        d._isLife = /жизн|жизь|\bж\b|жз|\blife\b|\bнс\b/.test(title);
+        d._isProperty = /\bдом\b|кварт|имущ|\bд\b|апарт|комнат/.test(title);
         d._isProlCalc = ['76','80'].includes(d._source) || d.IS_RETURN_CUSTOMER === 'Y';
         const res = calcPoints(d);
         totalPoints += res.points || 0;
