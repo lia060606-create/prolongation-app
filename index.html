@@ -2705,6 +2705,17 @@ let POINTS_RAW = {};      // raw byManager data from loadPoints
 let POINTS_ALL_DEALS = []; // flat list of all deals with manager name
 let CHARTS = {};           // Chart.js instances
 
+// ===== FIELD CONSTANTS =====
+const FIELD_POLICY_END    = 'UF_CRM_1609921954607';  // Дата окончания полиса
+const FIELD_POLICY_NUM    = 'UF_CRM_1609923110282';  // Номер полиса
+const FIELD_POLICY_START  = 'UF_CRM_1609921922120';  // Дата начала полиса
+const FIELD_COMMENT_UF    = 'UF_CRM_1668776684344';  // Комментарий менеджера
+const FIELD_SOURCE        = 'UF_CRM_1609920495607';  // Источник сделки
+const SOURCE_PROLONGATION = '76';                     // ID Пролонгация
+const FIELD_SK            = 'UF_CRM_1606650631517';  // СК ОСАГО
+const FIELD_BANK          = 'UF_CRM_1621250213416';  // Кредитная организация
+const FIELD_PREMIUM       = 'UF_CRM_1621248599553';  // Страховая премия ЖИЗНЬ
+
 function populatePointsManagerFilter(byManager) {
   const sel = document.getElementById('pf-manager');
   if (!sel) return;
