@@ -1565,6 +1565,15 @@ async function createProlongationDeal(sourceDeal) {
     SOURCE_ID: 'REPEAT_SALE',
     [FIELD_SOURCE]: SOURCE_PROLONGATION,
     // Copy all key fields from source deal
+    // Дата оформления = прошлогодняя дата + 1 год
+    'UF_CRM_1611827119611': (function() {
+      const oldDate = sourceDeal['UF_CRM_1611827119611'];
+      if (!oldDate) return '';
+      const d = new Date(oldDate);
+      if (isNaN(d)) return '';
+      d.setFullYear(d.getFullYear() + 1);
+      return d.toISOString().split('T')[0];
+    })(),
     'UF_CRM_1611829653533': sourceDeal['UF_CRM_1611829653533'] || '', // Город клиента
     'UF_CRM_1606650631517': sourceDeal['UF_CRM_1606650631517'] || '', // СК ОСАГО
     'UF_CRM_1730370141733': sourceDeal['UF_CRM_1730370141733'] || '', // СК КАСКО
@@ -1709,10 +1718,10 @@ function getProlPeriodRange() {
 
 function getProlPeriodLabel() {
   switch(PROL_PERIOD) {
-    case 'today':  return 'сегодня (ровно по порогу)';
-    case '3days':  return 'в ближайшие 3 дня';
-    case 'week':   return 'в ближайшую неделю';
-    case 'month':  return 'в ближайший месяц';
+    case 'today':  return 'ровно сегодня по порогу (±1 день)';
+    case '3days':  return '±3 дня от порога (пропущенные + ближайшие)';
+    case 'week':   return '±7 дней от порога';
+    case 'month':  return 'в ближайшие 90 дней';
     default:       return '';
   }
 }
@@ -1720,24 +1729,35 @@ function getProlPeriodLabel() {
 function filterDeals() {
   const typeF = document.getElementById('filter-type').value;
   const mgrF = document.getElementById('filter-manager').value;
-  const range = getProlPeriodRange();
 
   let list = ALL_DEALS.filter(d => {
     if (!d._needsProlongation) return false;
-    // For "today" mode: show deals where daysUntil equals threshold exactly (±2 days)
-    if (PROL_PERIOD === 'today') {
-      const slack = 2;
-      return d._daysUntil >= (d._threshold - slack) && d._daysUntil <= d._threshold;
+    const days = d._daysUntil;
+    if (days === null) return false;
+
+    switch(PROL_PERIOD) {
+      case 'today':
+        // Ровно сегодня: дата окончания = сегодня + порог (±1 день)
+        return days >= (d._threshold - 1) && days <= (d._threshold + 1);
+      case '3days':
+        // ±3 дня от порога: захватывает пропущенные и ближайшие
+        return days >= (d._threshold - 3) && days <= (d._threshold + 3);
+      case 'week':
+        // ±7 дней от порога
+        return days >= (d._threshold - 7) && days <= (d._threshold + 7);
+      case 'month':
+        // Все у кого полис кончается в ближайшие 90 дней
+        return days >= 0 && days <= 90;
+      default:
+        return days >= (d._threshold - 1) && days <= (d._threshold + 1);
     }
-    // For other periods: show all within range
-    return d._daysUntil >= range.min && d._daysUntil <= range.max;
   });
 
   if (typeF) list = list.filter(d => d._type === typeF);
   if (mgrF) list = list.filter(d => MANAGERS[d.ASSIGNED_BY_ID] === mgrF);
 
   FILTERED_DEALS = list;
-  // Update desc and count
+
   const descEl = document.getElementById('prol-desc');
   if (descEl) descEl.textContent = 'Полис заканчивается ' + getProlPeriodLabel();
   const countEl = document.getElementById('prol-count');
