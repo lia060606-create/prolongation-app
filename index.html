@@ -2383,7 +2383,8 @@ async function loadReconcile() {
     // Step 2: Load ONLY prolongation deals from current year (source=76 or 80)
     // This is much faster than loading ALL deals
     const curYear = now.getFullYear();
-    const curFilter = { '>=DATE_CREATE': curYear + '-01-01' };
+    // Search prolongations from last 18 months to catch Dec 2025 cases
+    const curFilter = { '>=DATE_CREATE': (curYear - 1) + '-07-01' };
     curFilter['UF_CRM_1609920495607'] = '76'; // источник = Пролонгация
 
     const curDeals = await bxCallAll('crm.deal.list', {
