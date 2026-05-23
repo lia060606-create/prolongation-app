@@ -804,23 +804,7 @@
         <button class="btn btn-secondary btn-sm" id="rec-pdf-btn" style="display:none" onclick="exportReconcilePDF()">📄 PDF</button>
       </div>
 
-      <!-- CHARTS (shown after load) -->
-      <div id="rec-charts" style="display:none;margin-bottom:20px">
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
-          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius2);padding:20px">
-            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:16px;text-transform:uppercase;letter-spacing:0.5px">По менеджерам</div>
-            <canvas id="rec-chart-mgr" height="200"></canvas>
-          </div>
-          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius2);padding:20px">
-            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:16px;text-transform:uppercase;letter-spacing:0.5px">По воронкам</div>
-            <canvas id="rec-chart-type" height="200"></canvas>
-          </div>
-          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius2);padding:20px">
-            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:16px;text-transform:uppercase;letter-spacing:0.5px">Покрытие %</div>
-            <canvas id="rec-chart-coverage" height="200"></canvas>
-          </div>
-        </div>
-      </div>
+
 
       <div id="rec-stats" class="stats-row" style="display:none">
         <div class="stat-card">
@@ -2495,7 +2479,6 @@ function renderReconcile() {
   const pdfBtn2 = document.getElementById('rec-pdf-btn');
   if (expBtn2) expBtn2.style.display = '';
   if (pdfBtn2) pdfBtn2.style.display = '';
-  renderRecCharts([], REC_FILTERED.length);
   return;
   }
 
@@ -2515,11 +2498,27 @@ function renderReconcile() {
     </div>
   </div>`;
 
-  html += `<div class="table-wrap"><table><thead><tr>
-    <th>Клиент</th><th>Воронка</th><th>Закрыта</th><th>Сумма</th><th>Менеджер</th><th></th>
-  </tr></thead><tbody>`;
+  let REC_SORT_COL = window.REC_SORT_COL || 'date';
+  let REC_SORT_DIR = window.REC_SORT_DIR || 1;
+  const rth = (col, label) => '<th style="cursor:pointer;user-select:none" onclick="window.REC_SORT_COL=\'' + col + '\';window.REC_SORT_DIR=(window.REC_SORT_COL===\'' + col + '\'&&window.REC_SORT_DIR===1)?-1:1;renderReconcile()">' + label + (REC_SORT_COL===col?(REC_SORT_DIR===1?' ↑':' ↓'):'') + '</th>';
+  html += '<div class="table-wrap"><table><thead><tr>' +
+    rth('name','Клиент') + rth('type','Воронка') + rth('date','Закрыта') +
+    rth('sum','Сумма') + rth('mgr','Менеджер') + '<th></th>' +
+    '</tr></thead><tbody>';
 
-  missing.sort((a,b) => (MANAGERS[a.ASSIGNED_BY_ID]||'').localeCompare(MANAGERS[b.ASSIGNED_BY_ID]||'')).forEach(d => {
+  const rsCol = window.REC_SORT_COL || 'date';
+  const rsDir = window.REC_SORT_DIR || 1;
+  missing.sort((a,b) => {
+    let av, bv;
+    switch(rsCol) {
+      case 'name': av = a.TITLE||''; bv = b.TITLE||''; break;
+      case 'type': av = a._type||''; bv = b._type||''; break;
+      case 'sum':  av = parseFloat(a.OPPORTUNITY||0); bv = parseFloat(b.OPPORTUNITY||0); break;
+      case 'mgr':  av = MANAGERS[a.ASSIGNED_BY_ID]||''; bv = MANAGERS[b.ASSIGNED_BY_ID]||''; break;
+      default:     av = new Date(a.CLOSEDATE||0).getTime(); bv = new Date(b.CLOSEDATE||0).getTime();
+    }
+    return av < bv ? -rsDir : av > bv ? rsDir : 0;
+  }).forEach(d => {
     const manager = MANAGERS[d.ASSIGNED_BY_ID] || '—';
     const sum = d.OPPORTUNITY ? Number(d.OPPORTUNITY).toLocaleString('ru-RU') + ' ₽' : '—';
     const closeDate = d.CLOSEDATE ? new Date(d.CLOSEDATE).toLocaleDateString('ru-RU') : '—';
@@ -2542,7 +2541,6 @@ function renderReconcile() {
   if (expBtn) expBtn.style.display = '';
   if (pdfBtn) pdfBtn.style.display = '';
   // Render charts
-  renderRecCharts(REC_FILTERED, total);
 }
 
 // ===== FINANCES =====
@@ -2874,93 +2872,7 @@ function exportFinancesExcel() {
 }
 
 // ===== RECONCILE CHARTS & EXPORT =====
-function renderRecCharts(missing, total) {
-  const chartsEl = document.getElementById('rec-charts');
-  if (!chartsEl) return;
-  chartsEl.style.display = 'block';
 
-  // Destroy old charts
-  ['rec-chart-mgr','rec-chart-type','rec-chart-coverage'].forEach(id => {
-    const inst = Chart.getChart(id);
-    if (inst) inst.destroy();
-  });
-
-  if (!missing.length) {
-    chartsEl.style.display = 'none';
-    return;
-  }
-
-  // Chart 1: Missing by manager
-  const byMgr = {};
-  missing.forEach(d => {
-    const name = (MANAGERS[d.ASSIGNED_BY_ID]||'?').split(' ')[0];
-    byMgr[name] = (byMgr[name]||0) + 1;
-  });
-  const ctx1 = document.getElementById('rec-chart-mgr');
-  if (ctx1) {
-    new Chart(ctx1, {
-      type: 'bar',
-      data: {
-        labels: Object.keys(byMgr),
-        datasets: [{ data: Object.values(byMgr), backgroundColor: '#f55353', borderRadius: 4 }]
-      },
-      options: {
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9896a4' } },
-          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9896a4' } }
-        }
-      }
-    });
-  }
-
-  // Chart 2: Missing by type
-  const byType = {};
-  missing.forEach(d => { byType[d._type] = (byType[d._type]||0) + 1; });
-  const typeColors = { ИПОТЕКА: '#4da3f5', ОСАГО: '#2dd4a0', КАСКО: '#7c6af7', КАСКО_ЛИД: '#f5a623', ПРОЧЕЕ: '#9896a4' };
-  const ctx2 = document.getElementById('rec-chart-type');
-  if (ctx2) {
-    new Chart(ctx2, {
-      type: 'doughnut',
-      data: {
-        labels: Object.keys(byType),
-        datasets: [{ data: Object.values(byType), backgroundColor: Object.keys(byType).map(t => typeColors[t]||'#555'), borderWidth: 0 }]
-      },
-      options: {
-        plugins: { legend: { position: 'bottom', labels: { color: '#9896a4', font: { size: 11 } } } },
-        cutout: '60%'
-      }
-    });
-  }
-
-  // Chart 3: Coverage % by manager (how many prolonged vs missed)
-  const allByMgr = {};
-  REC_ALL.forEach(d => {
-    const name = (MANAGERS[d.ASSIGNED_BY_ID]||'?').split(' ')[0];
-    if (!allByMgr[name]) allByMgr[name] = { total: 0, done: 0 };
-    allByMgr[name].total++;
-    if (d._hasProlongation) allByMgr[name].done++;
-  });
-  const coverageLabels = Object.keys(allByMgr);
-  const coverageData = coverageLabels.map(n => allByMgr[n].total > 0 ? Math.round(allByMgr[n].done / allByMgr[n].total * 100) : 0);
-  const ctx3 = document.getElementById('rec-chart-coverage');
-  if (ctx3) {
-    new Chart(ctx3, {
-      type: 'bar',
-      data: {
-        labels: coverageLabels,
-        datasets: [{ data: coverageData, backgroundColor: coverageData.map(v => v >= 80 ? '#2dd4a0' : v >= 60 ? '#f5a623' : '#f55353'), borderRadius: 4 }]
-      },
-      options: {
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9896a4' } },
-          y: { max: 100, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9896a4', callback: v => v + '%' } }
-        }
-      }
-    });
-  }
-}
 
 function exportReconcileExcel() {
   if (!REC_FILTERED.length) { alert('Нет данных для выгрузки'); return; }
@@ -2997,15 +2909,36 @@ function exportReconcileExcel() {
 
 function exportReconcilePDF() {
   if (!REC_FILTERED.length) { alert('Нет данных'); return; }
-  const missing = REC_FILTERED.filter(d => !d._hasProlongation);
+  const missing = REC_FILTERED.filter(function(d){ return !d._hasProlongation; });
+  const total = REC_FILTERED.length;
+  const done = total - missing.length;
+  const pct = total > 0 ? Math.round(done/total*100) : 0;
   const dateFrom = document.getElementById('rec-date-from') ? document.getElementById('rec-date-from').value : '';
   const dateTo = document.getElementById('rec-date-to') ? document.getElementById('rec-date-to').value : '';
-  
+  const typeF = document.getElementById('rec-filter-type') ? document.getElementById('rec-filter-type').value : '';
+  const mgrF = document.getElementById('rec-filter-manager') ? document.getElementById('rec-filter-manager').value : '';
+
   const w = window.open('', '_blank');
-  w.document.write('<html><head><title>Сверка пролонгаций</title><style>body{font-family:Arial,sans-serif;font-size:12px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:4px 8px}th{background:#f0f0f0}h2{margin-bottom:4px}p{color:#666;margin-top:0}</style></head><body>');
+  w.document.write('<html><head><title>Сверка пролонгаций</title><style>');
+  w.document.write('body{font-family:Arial,sans-serif;font-size:12px;color:#000}');
+  w.document.write('h2{margin-bottom:8px}.stats{display:flex;gap:16px;margin-bottom:20px}.stat-box{border:1px solid #ddd;border-radius:8px;padding:12px 20px;min-width:120px;text-align:center}');
+  w.document.write('.stat-num{font-size:28px;font-weight:700;margin:4px 0}.stat-label{font-size:11px;color:#666;text-transform:uppercase}');
+  w.document.write('.red{color:#e53935}.green{color:#43a047}.grey{color:#333}');
+  w.document.write('table{border-collapse:collapse;width:100%;margin-top:16px}th,td{border:1px solid #ddd;padding:5px 8px;text-align:left}th{background:#f5f5f5;font-size:11px;text-transform:uppercase}');
+  w.document.write('</style></head><body>');
   w.document.write('<h2>Сверка пролонгаций</h2>');
-  w.document.write('<p>Период: ' + dateFrom + ' — ' + dateTo + ' | Без пролонгации: ' + missing.length + ' из ' + REC_FILTERED.length + '</p>');
-  w.document.write('<table><tr><th>ФИО</th><th>Воронка</th><th>Закрыта</th><th>Сумма</th><th>Менеджер</th></tr>');
+  w.document.write('<p style="color:#666;margin:0 0 16px">Период: <b>' + dateFrom + ' — ' + dateTo + '</b>' + (typeF ? ' | Воронка: ' + typeF : '') + (mgrF ? ' | Менеджер: ' + mgrF : '') + '</p>');
+  
+  // Summary cards
+  w.document.write('<div class="stats">');
+  w.document.write('<div class="stat-box"><div class="stat-label">Без пролонгации</div><div class="stat-num red">' + missing.length + '</div><div class="stat-label">сделок потеряно</div></div>');
+  w.document.write('<div class="stat-box"><div class="stat-label">Успешно продлены</div><div class="stat-num green">' + done + '</div><div class="stat-label">пролонгаций создано</div></div>');
+  w.document.write('<div class="stat-box"><div class="stat-label">Всего сделок</div><div class="stat-num grey">' + total + '</div><div class="stat-label">закрыто за период</div></div>');
+  w.document.write('<div class="stat-box"><div class="stat-label">Покрытие</div><div class="stat-num ' + (pct>=80?'green':pct>=50?'grey':'red') + '">' + pct + '%</div><div class="stat-label">% пролонгировано</div></div>');
+  w.document.write('</div>');
+
+  // Table
+  w.document.write('<table><tr><th>ФИО клиента</th><th>Воронка</th><th>Закрыта</th><th>Сумма</th><th>Менеджер</th></tr>');
   missing.forEach(function(d) {
     w.document.write('<tr><td>' + d.TITLE + '</td><td>' + d._type + '</td><td>' + (d.CLOSEDATE ? new Date(d.CLOSEDATE).toLocaleDateString('ru-RU') : '—') + '</td><td>' + parseFloat(d.OPPORTUNITY||0).toFixed(0) + ' ₽</td><td>' + (MANAGERS[d.ASSIGNED_BY_ID]||'—') + '</td></tr>');
   });
