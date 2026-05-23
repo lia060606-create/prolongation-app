@@ -1231,18 +1231,8 @@ async function loadDeals() {
   // UF_CRM_1609921922120 = Дата начала действия полиса
   // UF_CRM_1611827119611 = Дата оформления (оригинал)
   // UF_CRM_1621335244025 = Срок ДО (дата закрытия ипотеки)
-  // UF_CRM_1606650631517 = СК (страховая компания)
-  // UF_CRM_1621250213416 = Кредитная организация
-  // UF_CRM_1621248599553 = Страховая премия ИПОТЕКА
-  // UF_CRM_1609923110282 = Комментарий (доп. поле)
-  const FIELD_POLICY_END   = 'UF_CRM_1609921954607';
-  const FIELD_POLICY_START = 'UF_CRM_1609921922120';
-  const FIELD_COMMENT_UF   = 'UF_CRM_1668776684344';  // Комментарий менеджера
-  const FIELD_SOURCE       = 'UF_CRM_1609920495607';   // Источник сделки
-  const SOURCE_PROLONGATION = '76';                      // ID Пролонгация
-  const FIELD_SK           = 'UF_CRM_1606650631517';
-  const FIELD_BANK         = 'UF_CRM_1621250213416';
-  const FIELD_PREMIUM      = 'UF_CRM_1621248599553';
+  // UF_CRM_1606650631517 = СК, UF_CRM_1621250213416 = Банк
+  // Field constants defined globally above
 
   // Only load deals where policy end date is within next 65 days
   // This reduces 700+ deals to ~50-100 relevant ones
@@ -1254,8 +1244,8 @@ async function loadDeals() {
   const allDeals = await bxCallAll('crm.deal.list', {
     filter: {
       'STAGE_SEMANTIC_ID': 'S',
-      '>=' + FIELD_POLICY_END: dateFrom,
-      '<=' + FIELD_POLICY_END: dateTo,
+      ['>='+FIELD_POLICY_END]: dateFrom,
+      ['<='+FIELD_POLICY_END]: dateTo,
       '>=DATE_CREATE': '2025-01-01'  // only deals from 2025+
     },
     select: [
