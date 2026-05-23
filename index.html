@@ -800,6 +800,26 @@
           <option value="">Все менеджеры</option>
         </select>
         <button class="btn btn-primary btn-sm" onclick="loadReconcile()">🔄 Проверить</button>
+        <button class="btn btn-secondary btn-sm" id="rec-export-btn" style="display:none" onclick="exportReconcileExcel()">📥 Excel</button>
+        <button class="btn btn-secondary btn-sm" id="rec-pdf-btn" style="display:none" onclick="exportReconcilePDF()">📄 PDF</button>
+      </div>
+
+      <!-- CHARTS (shown after load) -->
+      <div id="rec-charts" style="display:none;margin-bottom:20px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius2);padding:20px">
+            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:16px;text-transform:uppercase;letter-spacing:0.5px">По менеджерам</div>
+            <canvas id="rec-chart-mgr" height="200"></canvas>
+          </div>
+          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius2);padding:20px">
+            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:16px;text-transform:uppercase;letter-spacing:0.5px">По воронкам</div>
+            <canvas id="rec-chart-type" height="200"></canvas>
+          </div>
+          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius2);padding:20px">
+            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:16px;text-transform:uppercase;letter-spacing:0.5px">Покрытие %</div>
+            <canvas id="rec-chart-coverage" height="200"></canvas>
+          </div>
+        </div>
       </div>
 
       <div id="rec-stats" class="stats-row" style="display:none">
@@ -2470,8 +2490,13 @@ function renderReconcile() {
   document.getElementById('badge-missing').style.display = missing.length > 0 ? '' : 'none';
 
   if (missing.length === 0) {
-    document.getElementById('rec-content').innerHTML = `<div class="alert alert-success"><div class="alert-icon">✅</div><div class="alert-body"><div class="alert-title">Все сделки пролонгированы!</div><div class="alert-text">Ни одна сделка прошлого года не потеряна.</div></div></div>`;
-    return;
+    document.getElementById('rec-content').innerHTML = '<div class="alert alert-success"><div class="alert-icon">✅</div><div class="alert-body"><div class="alert-title">Все сделки пролонгированы!</div><div class="alert-text">Ни одна сделка прошлого года не потеряна.</div></div></div>';
+  const expBtn2 = document.getElementById('rec-export-btn');
+  const pdfBtn2 = document.getElementById('rec-pdf-btn');
+  if (expBtn2) expBtn2.style.display = '';
+  if (pdfBtn2) pdfBtn2.style.display = '';
+  renderRecCharts([], REC_FILTERED.length);
+  return;
   }
 
   // Group missing by manager
@@ -2510,7 +2535,14 @@ function renderReconcile() {
 
   html += '</tbody></table></div>';
   document.getElementById('rec-content').innerHTML = html;
-  addLog('warn', `Сверка завершена: ${missing.length} сделок без пролонгации из ${total}`);
+  addLog('warn', 'Сверка завершена: ' + missing.length + ' сделок без пролонгации из ' + total);
+  // Show export buttons
+  const expBtn = document.getElementById('rec-export-btn');
+  const pdfBtn = document.getElementById('rec-pdf-btn');
+  if (expBtn) expBtn.style.display = '';
+  if (pdfBtn) pdfBtn.style.display = '';
+  // Render charts
+  renderRecCharts(REC_FILTERED, total);
 }
 
 // ===== FINANCES =====
@@ -2839,6 +2871,147 @@ function exportFinancesExcel() {
   var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   var a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = 'finansy_' + monthVal + '.csv'; a.click();
+}
+
+// ===== RECONCILE CHARTS & EXPORT =====
+function renderRecCharts(missing, total) {
+  const chartsEl = document.getElementById('rec-charts');
+  if (!chartsEl) return;
+  chartsEl.style.display = 'block';
+
+  // Destroy old charts
+  ['rec-chart-mgr','rec-chart-type','rec-chart-coverage'].forEach(id => {
+    const inst = Chart.getChart(id);
+    if (inst) inst.destroy();
+  });
+
+  if (!missing.length) {
+    chartsEl.style.display = 'none';
+    return;
+  }
+
+  // Chart 1: Missing by manager
+  const byMgr = {};
+  missing.forEach(d => {
+    const name = (MANAGERS[d.ASSIGNED_BY_ID]||'?').split(' ')[0];
+    byMgr[name] = (byMgr[name]||0) + 1;
+  });
+  const ctx1 = document.getElementById('rec-chart-mgr');
+  if (ctx1) {
+    new Chart(ctx1, {
+      type: 'bar',
+      data: {
+        labels: Object.keys(byMgr),
+        datasets: [{ data: Object.values(byMgr), backgroundColor: '#f55353', borderRadius: 4 }]
+      },
+      options: {
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9896a4' } },
+          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9896a4' } }
+        }
+      }
+    });
+  }
+
+  // Chart 2: Missing by type
+  const byType = {};
+  missing.forEach(d => { byType[d._type] = (byType[d._type]||0) + 1; });
+  const typeColors = { ИПОТЕКА: '#4da3f5', ОСАГО: '#2dd4a0', КАСКО: '#7c6af7', КАСКО_ЛИД: '#f5a623', ПРОЧЕЕ: '#9896a4' };
+  const ctx2 = document.getElementById('rec-chart-type');
+  if (ctx2) {
+    new Chart(ctx2, {
+      type: 'doughnut',
+      data: {
+        labels: Object.keys(byType),
+        datasets: [{ data: Object.values(byType), backgroundColor: Object.keys(byType).map(t => typeColors[t]||'#555'), borderWidth: 0 }]
+      },
+      options: {
+        plugins: { legend: { position: 'bottom', labels: { color: '#9896a4', font: { size: 11 } } } },
+        cutout: '60%'
+      }
+    });
+  }
+
+  // Chart 3: Coverage % by manager (how many prolonged vs missed)
+  const allByMgr = {};
+  REC_ALL.forEach(d => {
+    const name = (MANAGERS[d.ASSIGNED_BY_ID]||'?').split(' ')[0];
+    if (!allByMgr[name]) allByMgr[name] = { total: 0, done: 0 };
+    allByMgr[name].total++;
+    if (d._hasProlongation) allByMgr[name].done++;
+  });
+  const coverageLabels = Object.keys(allByMgr);
+  const coverageData = coverageLabels.map(n => allByMgr[n].total > 0 ? Math.round(allByMgr[n].done / allByMgr[n].total * 100) : 0);
+  const ctx3 = document.getElementById('rec-chart-coverage');
+  if (ctx3) {
+    new Chart(ctx3, {
+      type: 'bar',
+      data: {
+        labels: coverageLabels,
+        datasets: [{ data: coverageData, backgroundColor: coverageData.map(v => v >= 80 ? '#2dd4a0' : v >= 60 ? '#f5a623' : '#f55353'), borderRadius: 4 }]
+      },
+      options: {
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9896a4' } },
+          y: { max: 100, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9896a4', callback: v => v + '%' } }
+        }
+      }
+    });
+  }
+}
+
+function exportReconcileExcel() {
+  if (!REC_FILTERED.length) { alert('Нет данных для выгрузки'); return; }
+  const missing = REC_FILTERED.filter(d => !d._hasProlongation);
+  if (!missing.length) { alert('Все сделки пролонгированы!'); return; }
+  
+  // Get current filter values for filename
+  const dateFrom = document.getElementById('rec-date-from') ? document.getElementById('rec-date-from').value : '';
+  const dateTo = document.getElementById('rec-date-to') ? document.getElementById('rec-date-to').value : '';
+  const typeF = document.getElementById('rec-filter-type') ? document.getElementById('rec-filter-type').value : '';
+  const mgrF = document.getElementById('rec-filter-manager') ? document.getElementById('rec-filter-manager').value : '';
+
+  var rows = [['ФИО клиента','Воронка','Дата закрытия','Сумма','Менеджер','Ссылка на сделку']];
+  missing.forEach(function(d) {
+    rows.push([
+      d.TITLE,
+      d._type,
+      d.CLOSEDATE ? new Date(d.CLOSEDATE).toLocaleDateString('ru-RU') : '—',
+      parseFloat(d.OPPORTUNITY||0).toFixed(0) + ' руб',
+      MANAGERS[d.ASSIGNED_BY_ID]||'—',
+      'https://shishlov.bitrix24.ru/crm/deal/details/' + d.ID + '/'
+    ]);
+  });
+
+  var lines = rows.map(function(r){ return r.map(function(v){ return '"'+String(v).replace(/"/g,'""')+'"'; }).join(','); });
+  var csv = '\uFEFF' + lines.join('\n');
+  var fname = 'сверка_' + (dateFrom||'') + '_' + (dateTo||'') + (typeF?'_'+typeF:'') + (mgrF?'_'+mgrF:'') + '.csv';
+  var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fname;
+  a.click();
+}
+
+function exportReconcilePDF() {
+  if (!REC_FILTERED.length) { alert('Нет данных'); return; }
+  const missing = REC_FILTERED.filter(d => !d._hasProlongation);
+  const dateFrom = document.getElementById('rec-date-from') ? document.getElementById('rec-date-from').value : '';
+  const dateTo = document.getElementById('rec-date-to') ? document.getElementById('rec-date-to').value : '';
+  
+  const w = window.open('', '_blank');
+  w.document.write('<html><head><title>Сверка пролонгаций</title><style>body{font-family:Arial,sans-serif;font-size:12px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:4px 8px}th{background:#f0f0f0}h2{margin-bottom:4px}p{color:#666;margin-top:0}</style></head><body>');
+  w.document.write('<h2>Сверка пролонгаций</h2>');
+  w.document.write('<p>Период: ' + dateFrom + ' — ' + dateTo + ' | Без пролонгации: ' + missing.length + ' из ' + REC_FILTERED.length + '</p>');
+  w.document.write('<table><tr><th>ФИО</th><th>Воронка</th><th>Закрыта</th><th>Сумма</th><th>Менеджер</th></tr>');
+  missing.forEach(function(d) {
+    w.document.write('<tr><td>' + d.TITLE + '</td><td>' + d._type + '</td><td>' + (d.CLOSEDATE ? new Date(d.CLOSEDATE).toLocaleDateString('ru-RU') : '—') + '</td><td>' + parseFloat(d.OPPORTUNITY||0).toFixed(0) + ' ₽</td><td>' + (MANAGERS[d.ASSIGNED_BY_ID]||'—') + '</td></tr>');
+  });
+  w.document.write('</table></body></html>');
+  w.document.close();
+  w.print();
 }
 
 // ===== POINTS FILTERS & CHARTS =====
