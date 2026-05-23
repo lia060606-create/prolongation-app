@@ -1244,8 +1244,20 @@ async function loadDeals() {
   const FIELD_BANK         = 'UF_CRM_1621250213416';
   const FIELD_PREMIUM      = 'UF_CRM_1621248599553';
 
+  // Only load deals where policy end date is within next 65 days
+  // This reduces 700+ deals to ~50-100 relevant ones
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const dateFrom = today.toISOString().split('T')[0];
+  const dateTo = new Date(today.getTime() + 65 * 86400000).toISOString().split('T')[0];
+
   const allDeals = await bxCallAll('crm.deal.list', {
-    filter: { 'STAGE_SEMANTIC_ID': 'S' },
+    filter: {
+      'STAGE_SEMANTIC_ID': 'S',
+      '>=' + FIELD_POLICY_END: dateFrom,
+      '<=' + FIELD_POLICY_END: dateTo,
+      '>=DATE_CREATE': '2025-01-01'  // only deals from 2025+
+    },
     select: [
       'ID','TITLE','ASSIGNED_BY_ID','CLOSEDATE','BEGINDATE',
       'OPPORTUNITY','CURRENCY_ID','COMMENTS','CATEGORY_ID',
@@ -1489,24 +1501,32 @@ async function createProlongationDeal(sourceDeal) {
   deadline.setDate(deadline.getDate() + 1);
   deadline.setHours(9, 0, 0, 0);
 
-  await bxCall('crm.activity.add', {
-    fields: {
-      OWNER_TYPE_ID: 2,        // сделка
-      OWNER_ID: newDealId,
-      TYPE_ID: 6,              // звонок/дело
-      SUBJECT: 'Пролонгация: ' + title + ' — полис до ' + dealEndStr,
-      DESCRIPTION: activityDesc,
-      RESPONSIBLE_ID: sourceDeal.ASSIGNED_BY_ID,
-      DEADLINE: deadline.toISOString(),
-      COMPLETED: 'N',
-      PRIORITY: sourceDeal._hasComment ? 2 : 1,
-      COMMUNICATIONS: [{
-        VALUE: sourceDeal.CONTACT_ID ? sourceDeal.CONTACT_ID : '',
-        ENTITY_TYPE_ID: 3,    // контакт
-        ENTITY_ID: sourceDeal.CONTACT_ID || 0
-      }]
-    }
-  });
+  // Create дело (CRM activity type 2 = звонок, shows in CRM feed)
+  const activityFields = {
+    'fields[OWNER_TYPE_ID]': '2',
+    'fields[OWNER_ID]': String(newDealId),
+    'fields[TYPE_ID]': '2',
+    'fields[DIRECTION]': '2',
+    'fields[SUBJECT]': 'Пролонгация: ' + title + ' — полис до ' + dealEndStr,
+    'fields[DESCRIPTION]': activityDesc,
+    'fields[DESCRIPTION_TYPE]': '1',
+    'fields[RESPONSIBLE_ID]': String(sourceDeal.ASSIGNED_BY_ID),
+    'fields[DEADLINE]': deadline.toISOString().replace('.000Z', '+00:00'),
+    'fields[COMPLETED]': 'N',
+    'fields[PRIORITY]': sourceDeal._hasComment ? '2' : '1'
+  };
+  if (sourceDeal.CONTACT_ID) {
+    activityFields['fields[COMMUNICATIONS][0][VALUE]'] = String(sourceDeal.CONTACT_ID);
+    activityFields['fields[COMMUNICATIONS][0][ENTITY_TYPE_ID]'] = '3';
+    activityFields['fields[COMMUNICATIONS][0][ENTITY_ID]'] = String(sourceDeal.CONTACT_ID);
+  }
+  
+  const actBody = new URLSearchParams(activityFields);
+  const actResp = await fetch(CONFIG.webhook + 'crm.activity.add.json', { method: 'POST', body: actBody });
+  if (actResp.ok) {
+    const actData = await actResp.json();
+    if (actData.error) addLog('warn', 'Дело: ' + actData.error_description);
+  }
 
   addLog('ok', 'Создана пролонгация #' + newDealId + ' + дело для: ' + title);
   return newDealId;
