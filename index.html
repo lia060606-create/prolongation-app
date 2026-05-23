@@ -1700,6 +1700,7 @@ function renderDealsTable() {
     const sum = d.OPPORTUNITY ? Number(d.OPPORTUNITY).toLocaleString('ru-RU') + ' ₽' : '—';
     const warn = d._hasComment ? `<span title="${d.COMMENTS}" style="cursor:help;color:var(--amber)">⚠️</span>` : '';
 
+    const dealIdx = FILTERED_DEALS.indexOf(d);
     html += '<tr>' +
       '<td><b><a href="https://shishlov.bitrix24.ru/crm/deal/details/' + d.ID + '/" target="_blank" style="color:var(--text);text-decoration:none">' + d.TITLE + '</a></b></td>' +
       '<td><span class="badge ' + getBadgeClass(d._type) + '">' + d._type + '</span></td>' +
@@ -1708,7 +1709,7 @@ function renderDealsTable() {
       '<td style="color:var(--text2)">' + sum + '</td>' +
       '<td style="color:var(--text2);font-size:12px">' + manager + '</td>' +
       '<td>' + warn + '</td>' +
-      '<td><button class="btn btn-secondary btn-sm" onclick='openDealModal(' + JSON.stringify(d).replace(/'/g,"&#39;").replace(/"/g,"&quot;") + ')'>→</button></td>' +
+      '<td><button class="btn btn-secondary btn-sm" onclick="openDealByIdx(' + dealIdx + ')">→</button></td>' +
       '</tr>';
   });
 
@@ -1717,6 +1718,11 @@ function renderDealsTable() {
 }
 
 // ===== MODAL =====
+function openDealByIdx(idx) {
+  const deal = FILTERED_DEALS[idx];
+  if (deal) openDealModal(deal);
+}
+
 function openDealModal(deal) {
   document.getElementById('modal-title').textContent = deal.TITLE;
   document.getElementById('modal-sub').textContent = deal._type + ' · ' + (MANAGERS[deal.ASSIGNED_BY_ID] || '—');
