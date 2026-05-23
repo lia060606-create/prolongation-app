@@ -927,6 +927,8 @@ let CONFIG = {
 };
 let ALL_DEALS = [];
 let FILTERED_DEALS = [];
+let SORT_COL = 'days';   // current sort column
+let SORT_DIR = 1;        // 1=asc, -1=desc
 let LOG_ENTRIES = [];
 let MANAGERS = {};
 
@@ -1315,16 +1317,32 @@ async function loadDeals() {
     return d;
   });
 
-  // Deduplicate by policy number: if same policy number exists in current year deals → already prolonged
+  // Deduplicate: check if prolongation already exists in current year
+  // Method 1: by policy number (most accurate)
   const currentYearPolicyNums = new Set(
+    ALL_DEALS.filter(d => d._isCurrentYear && d._policyNum).map(d => d._policyNum)
+  );
+  // Method 2: by contact+category with source=Prolongation
+  const currentYearProlonged = new Set(
     ALL_DEALS
-      .filter(d => d._isCurrentYear && d._policyNum)
-      .map(d => d._policyNum)
+      .filter(d => d._isCurrentYear && d._isProlongationDeal && d.CONTACT_ID)
+      .map(d => d.CONTACT_ID + '_' + d.CATEGORY_ID + '_' + (d.TITLE||'').split(' ').slice(0,3).join(' ').toLowerCase())
   );
   ALL_DEALS.forEach(d => {
-    if (d._needsProlongation && d._policyNum && currentYearPolicyNums.has(d._policyNum)) {
+    if (!d._needsProlongation) return;
+    // Check by policy number
+    if (d._policyNum && currentYearPolicyNums.has(d._policyNum)) {
       d._alreadyProlonged = true;
       d._needsProlongation = false;
+      return;
+    }
+    // Check by contact+category+name (first 3 words)
+    if (d.CONTACT_ID) {
+      const key = d.CONTACT_ID + '_' + d.CATEGORY_ID + '_' + (d.TITLE||'').split(' ').slice(0,3).join(' ').toLowerCase();
+      if (currentYearProlonged.has(key)) {
+        d._alreadyProlonged = true;
+        d._needsProlongation = false;
+      }
     }
   });
 
@@ -1639,18 +1657,41 @@ function filterDeals() {
   renderDealsTable();
 }
 
+function sortDeals(col) {
+  if (SORT_COL === col) SORT_DIR *= -1;
+  else { SORT_COL = col; SORT_DIR = 1; }
+  renderDealsTable();
+}
+
 function renderDealsTable() {
   if (!FILTERED_DEALS.length) {
-    document.getElementById('deals-content').innerHTML = `<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-title">Нет сделок по выбранным фильтрам</div></div>`;
+    document.getElementById('deals-content').innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-title">Нет сделок по выбранным фильтрам</div></div>';
     return;
   }
 
-  const sorted = [...FILTERED_DEALS].sort((a,b) => (a._daysUntil||999) - (b._daysUntil||999));
+  const sorted = [...FILTERED_DEALS].sort((a,b) => {
+    let av, bv;
+    switch(SORT_COL) {
+      case 'name':  av = a.TITLE||''; bv = b.TITLE||''; break;
+      case 'type':  av = a._type||''; bv = b._type||''; break;
+      case 'date':  av = a._policyEnd ? new Date(a._policyEnd).getTime() : 0; bv = b._policyEnd ? new Date(b._policyEnd).getTime() : 0; break;
+      case 'sum':   av = parseFloat(a.OPPORTUNITY||0); bv = parseFloat(b.OPPORTUNITY||0); break;
+      case 'mgr':   av = MANAGERS[a.ASSIGNED_BY_ID]||''; bv = MANAGERS[b.ASSIGNED_BY_ID]||''; break;
+      default:      av = a._daysUntil||999; bv = b._daysUntil||999;
+    }
+    if (av < bv) return -1 * SORT_DIR;
+    if (av > bv) return 1 * SORT_DIR;
+    return 0;
+  });
 
-  let html = `<div class="table-wrap"><table><thead><tr>
-    <th>Клиент</th><th>Воронка</th><th>Дата окончания</th><th>Дней осталось</th>
-    <th>Сумма</th><th>Менеджер</th><th>Комм.</th><th></th>
-  </tr></thead><tbody>`;
+  const arr = s => s === SORT_COL ? (SORT_DIR === 1 ? ' ↑' : ' ↓') : '';
+  const th = (col, label) => '<th style="cursor:pointer;user-select:none" onclick="sortDeals(\'' + col + '\')">' + label + arr(col) + '</th>';
+
+  let html = '<div class="table-wrap"><table><thead><tr>' +
+    th('name','Клиент') + th('type','Воронка') + th('date','Дата окончания') +
+    th('days','Дней') + th('sum','Сумма') + th('mgr','Менеджер') +
+    '<th>Комм.</th><th></th>' +
+    '</tr></thead><tbody>';
 
   sorted.forEach(d => {
     const days = d._daysUntil;
@@ -1659,16 +1700,16 @@ function renderDealsTable() {
     const sum = d.OPPORTUNITY ? Number(d.OPPORTUNITY).toLocaleString('ru-RU') + ' ₽' : '—';
     const warn = d._hasComment ? `<span title="${d.COMMENTS}" style="cursor:help;color:var(--amber)">⚠️</span>` : '';
 
-    html += `<tr>
-      <td><b>${d.TITLE}</b></td>
-      <td><span class="badge ${getBadgeClass(d._type)}">${d._type}</span></td>
-      <td>${formatDate(d._policyEnd)}</td>
-      <td><span class="days-badge ${cls}">${days !== null ? days + 'д' : '—'}</span></td>
-      <td style="color:var(--text2)">${sum}</td>
-      <td style="color:var(--text2);font-size:12px">${manager}</td>
-      <td>${warn}</td>
-      <td><button class="btn btn-secondary btn-sm" onclick='openDealModal(${JSON.stringify(d).replace(/'/g,"&#39;").replace(/"/g,"&quot;")})'>→</button></td>
-    </tr>`;
+    html += '<tr>' +
+      '<td><b><a href="https://shishlov.bitrix24.ru/crm/deal/details/' + d.ID + '/" target="_blank" style="color:var(--text);text-decoration:none">' + d.TITLE + '</a></b></td>' +
+      '<td><span class="badge ' + getBadgeClass(d._type) + '">' + d._type + '</span></td>' +
+      '<td>' + formatDate(d._policyEnd) + '</td>' +
+      '<td><span class="days-badge ' + cls + '">' + (days !== null ? days + 'д' : '—') + '</span></td>' +
+      '<td style="color:var(--text2)">' + sum + '</td>' +
+      '<td style="color:var(--text2);font-size:12px">' + manager + '</td>' +
+      '<td>' + warn + '</td>' +
+      '<td><button class="btn btn-secondary btn-sm" onclick='openDealModal(' + JSON.stringify(d).replace(/'/g,"&#39;").replace(/"/g,"&quot;") + ')'>→</button></td>' +
+      '</tr>';
   });
 
   html += '</tbody></table></div>';
@@ -2266,6 +2307,8 @@ async function loadReconcile() {
   try {
     const now = new Date();
     const prevYear = now.getFullYear() - 1;
+    // Also check missed prolongations: policies that ended Oct-Dec 2025 or Jan-Apr 2026
+    // but were never prolonged
 
     // Load categories
     let catMap = {};
@@ -2279,8 +2322,8 @@ async function loadReconcile() {
     const prevDeals = await bxCallAll('crm.deal.list', {
       filter: {
         'STAGE_SEMANTIC_ID': 'S',
-        '>=CLOSEDATE': `${prevYear}-01-01`,
-        '<=CLOSEDATE': `${prevYear}-12-31`
+        '>=CLOSEDATE': (prevYear) + '-09-01',
+        '<=CLOSEDATE': now.toISOString().split('T')[0]
       },
       select: ['ID','TITLE','ASSIGNED_BY_ID','CATEGORY_ID','CLOSEDATE',
                'CONTACT_ID','OPPORTUNITY','UF_CRM_1609921954607',
@@ -2407,7 +2450,7 @@ function renderReconcile() {
     const sum = d.OPPORTUNITY ? Number(d.OPPORTUNITY).toLocaleString('ru-RU') + ' ₽' : '—';
     const closeDate = d.CLOSEDATE ? new Date(d.CLOSEDATE).toLocaleDateString('ru-RU') : '—';
     html += `<tr>
-      <td><b>${d.TITLE}</b></td>
+      <td><b><a href="https://shishlov.bitrix24.ru/crm/deal/details/${d.ID}/" target="_blank" style="color:var(--text);text-decoration:none" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text)'">${d.TITLE}</a></b></td>
       <td><span class="badge ${getBadgeClass(d._type)}">${d._type}</span></td>
       <td style="color:var(--text2);font-size:12px">${closeDate}</td>
       <td style="color:var(--text2);font-size:12px">${sum}</td>
