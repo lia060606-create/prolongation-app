@@ -1494,7 +1494,7 @@ function renderDashboard() {
       const days = d._daysUntil;
       const cls = days <= 7 ? 'days-critical' : days <= 14 ? 'days-warning' : 'days-ok';
       const manager = MANAGERS[d.ASSIGNED_BY_ID] || '—';
-      const warn = d._hasComment ? ' ⚠️' : '';
+      const warn = (d._hasComment && d._commentText) ? '<span title="' + (d._commentText||'').replace(/"/g,'&quot;').slice(0,200) + '" style="cursor:help;color:var(--amber)">⚠️</span>' : '';
       html += `<tr>
         <td><b>${d.TITLE}${warn}</b></td>
         <td><span class="badge ${getBadgeClass(d._type)}">${d._type}</span></td>
@@ -1806,7 +1806,7 @@ function renderDealsTable() {
     const cls = days <= 7 ? 'days-critical' : days <= 14 ? 'days-warning' : 'days-ok';
     const manager = MANAGERS[d.ASSIGNED_BY_ID] || '—';
     const sum = d.OPPORTUNITY ? Number(d.OPPORTUNITY).toLocaleString('ru-RU') + ' ₽' : '—';
-    const warn = d._hasComment ? `<span title="${d.COMMENTS}" style="cursor:help;color:var(--amber)">⚠️</span>` : '';
+    const warn = (d._hasComment && d._commentText) ? '<span title="' + d._commentText.replace(/"/g, '&quot;').slice(0, 200) + '" style="cursor:help;color:var(--amber)">⚠️</span>' : '';
 
     const dealIdx = FILTERED_DEALS.indexOf(d);
     html += '<tr>' +
