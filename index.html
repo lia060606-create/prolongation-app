@@ -1235,19 +1235,20 @@ async function loadDeals() {
   // Field constants defined globally above
 
   // Only load deals where policy end date is within next 65 days
-  // This reduces 700+ deals to ~50-100 relevant ones
-  const today = new Date();
-  today.setHours(0,0,0,0);
-  const dateFrom = today.toISOString().split('T')[0];
-  const dateTo = new Date(today.getTime() + 65 * 86400000).toISOString().split('T')[0];
+  const todayFilter = new Date();
+  todayFilter.setHours(0,0,0,0);
+  const dateFrom = todayFilter.toISOString().split('T')[0];
+  const dateTo = new Date(todayFilter.getTime() + 65 * 86400000).toISOString().split('T')[0];
+
+  const filterObj = {
+    'STAGE_SEMANTIC_ID': 'S',
+    '>=DATE_CREATE': '2025-01-01'
+  };
+  filterObj['>=' + FIELD_POLICY_END] = dateFrom;
+  filterObj['<=' + FIELD_POLICY_END] = dateTo;
 
   const allDeals = await bxCallAll('crm.deal.list', {
-    filter: {
-      'STAGE_SEMANTIC_ID': 'S',
-      ['>='+FIELD_POLICY_END]: dateFrom,
-      ['<='+FIELD_POLICY_END]: dateTo,
-      '>=DATE_CREATE': '2025-01-01'  // only deals from 2025+
-    },
+    filter: filterObj,
     select: [
       'ID','TITLE','ASSIGNED_BY_ID','CLOSEDATE','BEGINDATE',
       'OPPORTUNITY','CURRENCY_ID','COMMENTS','CATEGORY_ID',
