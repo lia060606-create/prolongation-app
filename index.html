@@ -771,22 +771,35 @@
       <div class="page-header">
         <div>
           <div class="page-title">Сверка пролонгаций</div>
-          <div class="page-desc">Сделки прошлого года без пролонгации в текущем году</div>
+          <div class="page-desc">Найти клиентов без пролонгации за выбранный период</div>
         </div>
-        <div class="header-actions">
-          <select class="filter-select" id="rec-filter-type" onchange="filterReconcile()">
-            <option value="">Все воронки</option>
-            <option value="ИПОТЕКА">Ипотека</option>
-            <option value="КАСКО">КАСКО</option>
-            <option value="КАСКО_ЛИД">КАСКО ЛИД</option>
-            <option value="ОСАГО">ОСАГО</option>
-            <option value="ПРОЧЕЕ">Прочее</option>
-          </select>
-          <select class="filter-select" id="rec-filter-manager" onchange="filterReconcile()">
-            <option value="">Все менеджеры</option>
-          </select>
-          <button class="btn btn-primary btn-sm" onclick="loadReconcile()">🔄 Проверить</button>
+      </div>
+
+      <!-- DATE RANGE + FILTERS -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:12px;color:var(--text2)">Полис закрыт с</span>
+          <input type="date" id="rec-date-from" style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);padding:6px 10px;color:var(--text);font-size:12px;font-family:inherit">
+          <span style="font-size:12px;color:var(--text2)">по</span>
+          <input type="date" id="rec-date-to" style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);padding:6px 10px;color:var(--text);font-size:12px;font-family:inherit">
         </div>
+        <div style="display:flex;gap:4px">
+          <button class="btn btn-secondary btn-sm" onclick="setRecPeriod('q4_2025')">Окт-Дек 2025</button>
+          <button class="btn btn-secondary btn-sm" onclick="setRecPeriod('q1_2026')">Янв-Мар 2026</button>
+          <button class="btn btn-secondary btn-sm" onclick="setRecPeriod('year_2025')">Весь 2025</button>
+        </div>
+        <select class="filter-select" id="rec-filter-type" onchange="filterReconcile()">
+          <option value="">Все воронки</option>
+          <option value="ИПОТЕКА">Ипотека</option>
+          <option value="КАСКО">КАСКО</option>
+          <option value="КАСКО_ЛИД">КАСКО ЛИД</option>
+          <option value="ОСАГО">ОСАГО</option>
+          <option value="ПРОЧЕЕ">Прочее</option>
+        </select>
+        <select class="filter-select" id="rec-filter-manager" onchange="filterReconcile()">
+          <option value="">Все менеджеры</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="loadReconcile()">🔄 Проверить</button>
       </div>
 
       <div id="rec-stats" class="stats-row" style="display:none">
@@ -945,6 +958,14 @@ function init() {
     });
     return;
   }
+  // Set default reconcile dates (prev year)
+  const now2 = new Date();
+  const py = now2.getFullYear() - 1;
+  const fromEl = document.getElementById('rec-date-from');
+  const toEl = document.getElementById('rec-date-to');
+  if (fromEl) fromEl.value = py + '-01-01';
+  if (toEl) toEl.value = py + '-12-31';
+
   // Always go to dashboard — webhook is hardcoded
   showPage('dashboard');
   loadDashboard();
@@ -2305,16 +2326,37 @@ function fillMonthFilter() {
 let REC_ALL = [];
 let REC_FILTERED = [];
 
+function setRecPeriod(period) {
+  const now = new Date();
+  let from, to;
+  switch(period) {
+    case 'q4_2025': from = '2025-10-01'; to = '2025-12-31'; break;
+    case 'q1_2026': from = '2026-01-01'; to = '2026-03-31'; break;
+    case 'year_2025': from = '2025-01-01'; to = '2025-12-31'; break;
+    default: from = (now.getFullYear()-1) + '-01-01'; to = (now.getFullYear()-1) + '-12-31';
+  }
+  const fromEl = document.getElementById('rec-date-from');
+  const toEl = document.getElementById('rec-date-to');
+  if (fromEl) fromEl.value = from;
+  if (toEl) toEl.value = to;
+}
+
 async function loadReconcile() {
   if (!CONFIG.webhook) { alert('Настройте webhook'); return; }
-  document.getElementById('rec-content').innerHTML = '<div class="empty-state"><div class="spinner"></div><div class="empty-sub" style="margin-top:12px">Загружаем сделки прошлого года...</div></div>';
+
+  // Get date range from inputs
+  const fromEl = document.getElementById('rec-date-from');
+  const toEl = document.getElementById('rec-date-to');
+  const now = new Date();
+  const prevYear = now.getFullYear() - 1;
+  const dateFrom = fromEl && fromEl.value ? fromEl.value : (prevYear + '-01-01');
+  const dateTo = toEl && toEl.value ? toEl.value : (prevYear + '-12-31');
+
+  document.getElementById('rec-content').innerHTML = '<div class="empty-state"><div class="spinner"></div><div class="empty-sub" style="margin-top:12px">Загружаем сделки за период ' + dateFrom + ' — ' + dateTo + '...</div></div>';
   document.getElementById('rec-stats').style.display = 'none';
 
   try {
-    const now = new Date();
-    const prevYear = now.getFullYear() - 1;
-    // Also check missed prolongations: policies that ended Oct-Dec 2025 or Jan-Apr 2026
-    // but were never prolonged
+    const xxx = 0; // placeholder
 
     // Load categories
     let catMap = {};
@@ -2328,8 +2370,8 @@ async function loadReconcile() {
     const prevDeals = await bxCallAll('crm.deal.list', {
       filter: {
         'STAGE_SEMANTIC_ID': 'S',
-        '>=CLOSEDATE': (prevYear) + '-09-01',
-        '<=CLOSEDATE': now.toISOString().split('T')[0]
+        '>=CLOSEDATE': dateFrom,
+        '<=CLOSEDATE': dateTo
       },
       select: ['ID','TITLE','ASSIGNED_BY_ID','CATEGORY_ID','CLOSEDATE',
                'CONTACT_ID','OPPORTUNITY','UF_CRM_1609921954607',
