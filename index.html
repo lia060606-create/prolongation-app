@@ -512,6 +512,9 @@
     <div class="nav-item" onclick="showPage('finances')" id="nav-finances">
       <span class="nav-icon">💰</span> Финансы
     </div>
+    <div class="nav-item" onclick="showPage('funnel')" id="nav-funnel">
+      <span class="nav-icon">📈</span> Воронка
+    </div>
     <div class="nav-item" onclick="showPage('log')" id="nav-log">
       <span class="nav-icon">📋</span> Журнал
     </div>
@@ -899,6 +902,66 @@
       </div>
     </div>
 
+    <!-- FUNNEL PAGE -->
+    <div class="page" id="page-funnel">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Воронка пролонгаций</div>
+          <div class="page-desc">Все пролонгации 2026 года — успешные, проваленные, висяки</div>
+        </div>
+        <div class="header-actions">
+          <select class="filter-select" id="fn-year" onchange="loadFunnel()">
+            <option value="2026">2026 год</option>
+            <option value="2025">2025 год</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" onclick="loadFunnel()">🔄 Обновить</button>
+          <button class="btn btn-secondary btn-sm" id="fn-export-btn" style="display:none" onclick="exportFunnelExcel()">📥 Excel</button>
+        </div>
+      </div>
+
+      <!-- FILTERS -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center">
+        <select class="filter-select" id="fn-filter-status" onchange="filterFunnel()">
+          <option value="">Все статусы</option>
+          <option value="S">✅ Успешные</option>
+          <option value="F">❌ Проваленные</option>
+          <option value="P">⏳ В работе</option>
+        </select>
+        <select class="filter-select" id="fn-filter-type" onchange="filterFunnel()">
+          <option value="">Все воронки</option>
+          <option value="ИПОТЕКА">Ипотека</option>
+          <option value="КАСКО">КАСКО</option>
+          <option value="КАСКО_ЛИД">КАСКО ЛИД</option>
+          <option value="ОСАГО">ОСАГО</option>
+          <option value="ПРОЧЕЕ">Прочее</option>
+        </select>
+        <select class="filter-select" id="fn-filter-mgr" onchange="filterFunnel()">
+          <option value="">Все менеджеры</option>
+        </select>
+        <span id="fn-count" style="font-size:12px;color:var(--text3)"></span>
+      </div>
+
+      <!-- SUMMARY STATS -->
+      <div id="fn-stats" style="display:none;margin-bottom:20px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
+          <div class="stat-card"><div class="stat-label">Всего пролонгаций</div><div class="stat-value" id="fn-total">—</div></div>
+          <div class="stat-card"><div class="stat-label">✅ Успешных</div><div class="stat-value green" id="fn-won">—</div><div class="stat-sub" id="fn-won-sum"></div></div>
+          <div class="stat-card"><div class="stat-label">❌ Проваленных</div><div class="stat-value red" id="fn-lost">—</div><div class="stat-sub" id="fn-lost-sum"></div></div>
+          <div class="stat-card"><div class="stat-label">⏳ В работе</div><div class="stat-value amber" id="fn-inwork">—</div><div class="stat-sub" id="fn-inwork-sum"></div></div>
+          <div class="stat-card"><div class="stat-label">Конверсия</div><div class="stat-value" id="fn-conv">—</div><div class="stat-sub">успешные / всего</div></div>
+        </div>
+      </div>
+
+      <div id="fn-content">
+        <div class="empty-state">
+          <div class="empty-icon">📈</div>
+          <div class="empty-title">Нажмите Обновить</div>
+          <div class="empty-sub">Загрузим все пролонгации за выбранный год</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LOG PAGE -->
     <!-- LOG PAGE -->
     <div class="page" id="page-log">
       <div class="page-header">
@@ -2871,6 +2934,169 @@ function exportFinancesExcel() {
   a.download = 'finansy_' + monthVal + '.csv'; a.click();
 }
 
+// ===== FUNNEL =====
+let FN_ALL = [];
+let FN_FILTERED = [];
+
+async function loadFunnel() {
+  if (!CONFIG.webhook) return;
+  document.getElementById('fn-content').innerHTML = '<div class="empty-state"><div class="spinner"></div><div class="empty-sub" style="margin-top:12px">Загружаем пролонгации...</div></div>';
+  document.getElementById('fn-stats').style.display = 'none';
+
+  try {
+    const year = document.getElementById('fn-year') ? document.getElementById('fn-year').value : '2026';
+
+    let catMap = {};
+    try { const cats = await bxCall('crm.dealcategory.list',{}); (cats||[]).forEach(c=>{catMap[c.ID]=c.NAME;}); } catch(e){}
+
+    if (!Object.keys(MANAGERS).length) {
+      try { const users = await bxCall('user.get',{FILTER:{ACTIVE:true}}); (users||[]).forEach(u=>{MANAGERS[u.ID]=(u.NAME+' '+u.LAST_NAME).trim();}); } catch(e){}
+    }
+
+    // Load all prolongation deals for the year
+    const filter = { '>=DATE_CREATE': year+'-01-01', '<=DATE_CREATE': year+'-12-31' };
+    filter[FIELD_SOURCE] = SOURCE_PROLONGATION;
+
+    const deals = await bxCallAll('crm.deal.list', {
+      filter: filter,
+      select: ['ID','TITLE','ASSIGNED_BY_ID','OPPORTUNITY','CATEGORY_ID',
+               'STAGE_SEMANTIC_ID','CLOSEDATE','DATE_CREATE',
+               FIELD_SOURCE,'UF_CRM_1775020680849','UF_CRM_1775020734771']
+    });
+
+    FN_ALL = deals.map(d => {
+      d.CATEGORY_NAME = catMap[d.CATEGORY_ID]||'';
+      d._type = getPipelineType(d);
+      d._status = d.STAGE_SEMANTIC_ID; // S=success, F=fail, P=in progress
+      d._sum = parseFloat(d.OPPORTUNITY||0);
+      d._daysInWork = d.DATE_CREATE ? Math.floor((new Date()-new Date(d.DATE_CREATE))/86400000) : 0;
+      return d;
+    });
+
+    // Fill manager filter
+    const mf = document.getElementById('fn-filter-mgr');
+    if (mf) {
+      const names = [...new Set(FN_ALL.filter(d=>!EXCLUDED_USER_IDS.includes(String(d.ASSIGNED_BY_ID))).map(d=>MANAGERS[d.ASSIGNED_BY_ID]).filter(Boolean))];
+      mf.innerHTML = '<option value="">Все менеджеры</option>' + names.map(n=>'<option value="'+n+'">'+n+'</option>').join('');
+    }
+
+    filterFunnel();
+    const expBtn = document.getElementById('fn-export-btn');
+    if (expBtn) expBtn.style.display = '';
+
+  } catch(e) {
+    document.getElementById('fn-content').innerHTML = '<div class="alert alert-err"><div class="alert-icon">✗</div><div class="alert-body"><div class="alert-title">Ошибка</div><div class="alert-text">'+e.message+'</div></div></div>';
+  }
+}
+
+function filterFunnel() {
+  const statusF = document.getElementById('fn-filter-status') ? document.getElementById('fn-filter-status').value : '';
+  const typeF   = document.getElementById('fn-filter-type')   ? document.getElementById('fn-filter-type').value   : '';
+  const mgrF    = document.getElementById('fn-filter-mgr')    ? document.getElementById('fn-filter-mgr').value    : '';
+
+  FN_FILTERED = FN_ALL.filter(d => {
+    if (EXCLUDED_USER_IDS.includes(String(d.ASSIGNED_BY_ID))) return false;
+    if (statusF === 'S' && d._status !== 'S') return false;
+    if (statusF === 'F' && d._status !== 'F') return false;
+    if (statusF === 'P' && d._status !== 'P') return false;
+    if (typeF && d._type !== typeF) return false;
+    if (mgrF && (MANAGERS[d.ASSIGNED_BY_ID]||'') !== mgrF) return false;
+    return true;
+  });
+
+  renderFunnel();
+}
+
+function renderFunnel() {
+  const won    = FN_FILTERED.filter(d => d._status === 'S');
+  const lost   = FN_FILTERED.filter(d => d._status === 'F');
+  const inwork = FN_FILTERED.filter(d => d._status !== 'S' && d._status !== 'F');
+  const total  = FN_FILTERED.length;
+  const conv   = total > 0 ? Math.round(won.length/total*100) : 0;
+
+  const sumFmt = arr => arr.reduce((s,d)=>s+d._sum,0).toLocaleString('ru-RU',{maximumFractionDigits:0}) + ' ₽';
+
+  document.getElementById('fn-total').textContent = total;
+  document.getElementById('fn-won').textContent = won.length;
+  document.getElementById('fn-won-sum').textContent = sumFmt(won);
+  document.getElementById('fn-lost').textContent = lost.length;
+  document.getElementById('fn-lost-sum').textContent = sumFmt(lost);
+  document.getElementById('fn-inwork').textContent = inwork.length;
+  document.getElementById('fn-inwork-sum').textContent = sumFmt(inwork);
+  document.getElementById('fn-conv').textContent = conv + '%';
+  document.getElementById('fn-stats').style.display = 'block';
+  document.getElementById('fn-count').textContent = total + ' сделок';
+
+  if (!total) {
+    document.getElementById('fn-content').innerHTML = '<div class="empty-state"><div class="empty-icon">📈</div><div class="empty-title">Нет данных по фильтрам</div></div>';
+    return;
+  }
+
+  // Sort by status then date
+  const sorted = [...FN_FILTERED].sort((a,b) => {
+    const order = {S:0, F:1, P:2};
+    const oa = order[a._status]||2, ob = order[b._status]||2;
+    if (oa !== ob) return oa - ob;
+    return new Date(b.DATE_CREATE||0) - new Date(a.DATE_CREATE||0);
+  });
+
+  const statusBadge = s => {
+    if (s === 'S') return '<span style="background:rgba(45,212,160,0.15);color:var(--green);padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600">✅ Успешно</span>';
+    if (s === 'F') return '<span style="background:rgba(245,83,83,0.15);color:var(--red);padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600">❌ Провал</span>';
+    return '<span style="background:rgba(245,166,35,0.15);color:var(--amber);padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600">⏳ В работе</span>';
+  };
+
+  let html = '<div class="table-wrap"><table><thead><tr>' +
+    '<th>Клиент</th><th>Воронка</th><th>Статус</th><th>Сумма</th>' +
+    '<th>Менеджер</th><th>Создана</th><th>Дней</th>' +
+    '</tr></thead><tbody>';
+
+  sorted.forEach(d => {
+    const sum = d._sum ? d._sum.toLocaleString('ru-RU',{maximumFractionDigits:0})+' ₽' : '—';
+    const mgr = MANAGERS[d.ASSIGNED_BY_ID]||'—';
+    const created = d.DATE_CREATE ? new Date(d.DATE_CREATE).toLocaleDateString('ru-RU') : '—';
+    const daysColor = d._status === 'P' && d._daysInWork > 30 ? 'color:var(--red)' : 'color:var(--text2)';
+    html += '<tr>' +
+      '<td><b><a href="https://shishlov.bitrix24.ru/crm/deal/details/'+d.ID+'/" target="_blank" style="color:var(--text);text-decoration:none">'+d.TITLE+'</a></b></td>' +
+      '<td><span class="badge '+getBadgeClass(d._type)+'">'+d._type+'</span></td>' +
+      '<td>'+statusBadge(d._status)+'</td>' +
+      '<td style="color:var(--text2)">'+sum+'</td>' +
+      '<td style="color:var(--text2);font-size:12px">'+mgr+'</td>' +
+      '<td style="color:var(--text2);font-size:12px">'+created+'</td>' +
+      '<td style="font-size:12px;'+daysColor+'">'+d._daysInWork+'д</td>' +
+      '</tr>';
+  });
+
+  html += '</tbody></table></div>';
+  document.getElementById('fn-content').innerHTML = html;
+}
+
+function exportFunnelExcel() {
+  if (!FN_FILTERED.length) { alert('Нет данных'); return; }
+  const year = document.getElementById('fn-year') ? document.getElementById('fn-year').value : '2026';
+  const statusMap = {S:'Успешно', F:'Провал', P:'В работе'};
+  var rows = [['ФИО клиента','Воронка','Статус','Сумма','Менеджер','Дата создания','Дней в работе','Ссылка']];
+  FN_FILTERED.forEach(function(d) {
+    rows.push([
+      d.TITLE, d._type,
+      statusMap[d._status]||d._status,
+      d._sum.toFixed(0)+' руб',
+      MANAGERS[d.ASSIGNED_BY_ID]||'—',
+      d.DATE_CREATE ? new Date(d.DATE_CREATE).toLocaleDateString('ru-RU') : '—',
+      d._daysInWork,
+      'https://shishlov.bitrix24.ru/crm/deal/details/'+d.ID+'/'
+    ]);
+  });
+  var lines = rows.map(function(r){ return r.map(function(v){ return '"'+String(v).replace(/"/g,'""')+'"'; }).join(','); });
+  var csv = '\uFEFF' + lines.join('
+');
+  var blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'воронка_'+year+'.csv';
+  a.click();
+}
+
 // ===== RECONCILE CHARTS & EXPORT =====
 
 
@@ -3180,6 +3406,7 @@ function showPage(name) {
   if (name === 'points' && CONFIG.webhook) loadPoints();
   if (name === 'reconcile' && CONFIG.webhook && REC_ALL.length === 0) loadReconcile();
   if (name === 'finances' && CONFIG.webhook) loadFinances();
+  if (name === 'funnel' && CONFIG.webhook) loadFunnel();
   if (name === 'settings') {
     const whEl = document.getElementById('webhook-url');
     if (whEl) whEl.value = CONFIG.webhook || 'https://shishlov.bitrix24.ru/rest/1/0jwk0c9s8z6ohhql/';
