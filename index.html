@@ -1020,15 +1020,27 @@ async function bxCall(method, params = {}) {
   if (!CONFIG.webhook) throw new Error('Webhook не настроен');
   const url = CONFIG.webhook + method + '.json';
   const body = new URLSearchParams();
-  function flatten(obj, prefix = '') {
-    for (const [k, v] of Object.entries(obj)) {
-      const key = prefix ? `${prefix}[${k}]` : k;
-      if (v && typeof v === 'object' && !Array.isArray(v)) flatten(v, key);
-      else if (Array.isArray(v)) v.forEach((item, i) => body.append(`${key}[${i}]`, item));
-      else body.append(key, v);
+  function flatten(obj, prefix) {
+    for (var k in obj) {
+      if (!obj.hasOwnProperty(k)) continue;
+      var v = obj[k];
+      var key = prefix ? prefix + '[' + k + ']' : k;
+      if (v === null || v === undefined || v === '') continue; // skip empty
+      if (Array.isArray(v)) {
+        v.forEach(function(item, i) {
+          if (item !== null && item !== undefined) {
+            if (typeof item === 'object') flatten(item, key + '[' + i + ']');
+            else body.append(key + '[' + i + ']', item);
+          }
+        });
+      } else if (typeof v === 'object') {
+        flatten(v, key);
+      } else {
+        body.append(key, v);
+      }
     }
   }
-  flatten(params);
+  flatten(params, '');
   const resp = await fetch(url, { method: 'POST', body });
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
   const data = await resp.json();
@@ -1044,15 +1056,27 @@ async function bxCallAll(method, params = {}) {
     const p = { ...params, start };
     const url = CONFIG.webhook + method + '.json';
     const body = new URLSearchParams();
-    function flatten(obj, prefix = '') {
-      for (const [k, v] of Object.entries(obj)) {
-        const key = prefix ? `${prefix}[${k}]` : k;
-        if (v && typeof v === 'object' && !Array.isArray(v)) flatten(v, key);
-        else if (Array.isArray(v)) v.forEach((item, i) => body.append(`${key}[${i}]`, item));
-        else body.append(key, v);
+    function flatten2(obj, prefix) {
+      for (var k in obj) {
+        if (!obj.hasOwnProperty(k)) continue;
+        var v = obj[k];
+        var key = prefix ? prefix + '[' + k + ']' : k;
+        if (v === null || v === undefined || v === '') continue;
+        if (Array.isArray(v)) {
+          v.forEach(function(item, i) {
+            if (item !== null && item !== undefined) {
+              if (typeof item === 'object') flatten2(item, key + '[' + i + ']');
+              else body.append(key + '[' + i + ']', item);
+            }
+          });
+        } else if (typeof v === 'object') {
+          flatten2(v, key);
+        } else {
+          body.append(key, v);
+        }
       }
     }
-    flatten(p);
+    flatten2(p, '');
     const resp = await fetch(url, { method: 'POST', body });
     const data = await resp.json();
     if (data.error) throw new Error(data.error_description || data.error);
@@ -1228,7 +1252,12 @@ async function loadDeals() {
       'CONTACT_ID','DATE_CREATE',
       FIELD_POLICY_END, FIELD_POLICY_START,
       FIELD_COMMENT_UF, FIELD_SK, FIELD_BANK, FIELD_PREMIUM,
-      FIELD_SOURCE, FIELD_POLICY_NUM, 'UF_CRM_1611755457413', 'SOURCE_ID', 'IS_RETURN_CUSTOMER'
+      FIELD_SOURCE, FIELD_POLICY_NUM, 'UF_CRM_1611755457413', 'SOURCE_ID', 'IS_RETURN_CUSTOMER',
+      'UF_CRM_1611829653533', 'UF_CRM_1606650372269', 'UF_CRM_1610107289284',
+      'UF_CRM_1610107379506', 'UF_CRM_1606651083093', 'UF_CRM_1609923363363',
+      'UF_CRM_1670774455887', 'UF_CRM_1679484014422', 'UF_CRM_1679484171126',
+      'UF_CRM_1621335244025', 'UF_CRM_1643644504930', 'UF_CRM_1739183976913',
+      'UF_CRM_1739184006572', 'UF_CRM_1730370141733'
     ]
   });
 
@@ -1405,18 +1434,17 @@ async function runProlongation() {
 async function createProlongationDeal(sourceDeal) {
   const title = sourceDeal.TITLE;
   const policyEnd = sourceDeal._policyEnd;
-  const manager = MANAGERS[sourceDeal.ASSIGNED_BY_ID] || 'Менеджер';
-  const greeting = parseNameForGreeting(sourceDeal.TITLE);
+  const managerName = MANAGERS[sourceDeal.ASSIGNED_BY_ID] || 'Менеджер';
+  const msgText = buildMessage(sourceDeal);
 
-  // Comment warning
-  let descParts = [];
+  // Warning from comment
+  let warnText = '';
   if (sourceDeal._hasComment) {
-    descParts.push(`⚠️ ВНИМАНИЕ — комментарий из предыдущей сделки:\n${sourceDeal._commentText}`);
+    warnText = '⚠️ ВНИМАНИЕ — комментарий из предыдущей сделки:\n' + sourceDeal._commentText + '\n\n';
   }
 
-  // Message template
-  const msgText = buildMessage(sourceDeal);
-  descParts.push(`\n📨 Шаблон сообщения клиенту:\n\n${msgText}`);
+  // All copied fields from source deal
+  const policyEndStr = policyEnd ? (new Date(policyEnd)).toISOString().split('T')[0] : '';
 
   const newDeal = {
     TITLE: title,
@@ -1424,37 +1452,63 @@ async function createProlongationDeal(sourceDeal) {
     CATEGORY_ID: sourceDeal.CATEGORY_ID,
     STAGE_ID: await getInWorkStageId(sourceDeal.CATEGORY_ID),
     CONTACT_ID: sourceDeal.CONTACT_ID,
-    COMMENTS: descParts.join('\n\n'),
     OPPORTUNITY: sourceDeal.OPPORTUNITY,
     SOURCE_ID: 'REPEAT_SALE',
     [FIELD_SOURCE]: SOURCE_PROLONGATION,
-    UF_CRM_SOURCE_DEAL: sourceDeal.ID,
-    // Copy policy end date field
-    [sourceDeal._policyEndField || FIELD_POLICY_END]: sourceDeal._policyEnd ? (new Date(sourceDeal._policyEnd)).toISOString().split('T')[0] : ''
+    // Copy all key fields from source deal
+    'UF_CRM_1611829653533': sourceDeal['UF_CRM_1611829653533'] || '', // Город клиента
+    'UF_CRM_1606650631517': sourceDeal['UF_CRM_1606650631517'] || '', // СК ОСАГО
+    'UF_CRM_1730370141733': sourceDeal['UF_CRM_1730370141733'] || '', // СК КАСКО
+    'UF_CRM_1621250213416': sourceDeal['UF_CRM_1621250213416'] || '', // Кредитная организация
+    'UF_CRM_1606650372269': sourceDeal['UF_CRM_1606650372269'] || '', // Объект страхования
+    'UF_CRM_1610107289284': sourceDeal['UF_CRM_1610107289284'] || '', // ГосНомер
+    'UF_CRM_1610107379506': sourceDeal['UF_CRM_1610107379506'] || '', // VIN
+    'UF_CRM_1606651083093': sourceDeal['UF_CRM_1606651083093'] || '', // Год выпуска авто
+    'UF_CRM_1609923363363': sourceDeal['UF_CRM_1609923363363'] || '', // Серия полиса
+    'UF_CRM_1609923110282': sourceDeal['UF_CRM_1609923110282'] || '', // Номер полиса
+    'UF_CRM_1670774455887': sourceDeal['UF_CRM_1670774455887'] || '', // Тип объекта
+    'UF_CRM_1679484014422': sourceDeal['UF_CRM_1679484014422'] || '', // Площадь объекта
+    'UF_CRM_1679484171126': sourceDeal['UF_CRM_1679484171126'] || '', // Год постройки
+    'UF_CRM_1621335244025': sourceDeal['UF_CRM_1621335244025'] || '', // Срок ипотеки ДО
+    'UF_CRM_1643644504930': sourceDeal['UF_CRM_1643644504930'] || '', // Дата выдачи ипотеки
+    'UF_CRM_1611755457413': sourceDeal['UF_CRM_1611755457413'] || '', // Вариант полиса (КВ%)
+    'UF_CRM_1739183976913': sourceDeal['UF_CRM_1739183976913'] || '', // КБМ
+    'UF_CRM_1739184006572': sourceDeal['UF_CRM_1739184006572'] || '', // Кол-во водителей
+    [FIELD_POLICY_END]: policyEndStr,
+    [FIELD_POLICY_START]: policyEndStr, // новый полис начинается с даты окончания старого
   };
 
   const newDealId = await bxCall('crm.deal.add', { fields: newDeal });
 
-  // Create task for manager
-  const taskTitle = `Пролонгация: ${title} — полис до ${formatDate(policyEnd)}`;
-  const taskDesc = sourceDeal._hasComment
-    ? `⚠️ Комментарий из предыдущей сделки: ${sourceDeal._commentText}\n\nОбратитесь к клиенту и уточните ситуацию перед пролонгацией.`
-    : `Свяжитесь с клиентом и предложите продление полиса. Шаблон сообщения есть в описании сделки.`;
+  // Create ДЕЛО (CRM activity) instead of task
+  const dealEndStr = formatDate(policyEnd);
+  const activityDesc = warnText + msgText;
 
+  // Deadline = today + 1 day (deal should be processed today/tomorrow)
   const deadline = new Date();
-  deadline.setDate(deadline.getDate() + 3);
+  deadline.setDate(deadline.getDate() + 1);
+  deadline.setHours(9, 0, 0, 0);
 
-  await bxCall('tasks.task.add', {
+  await bxCall('crm.activity.add', {
     fields: {
-      TITLE: taskTitle,
-      DESCRIPTION: taskDesc,
+      OWNER_TYPE_ID: 2,        // сделка
+      OWNER_ID: newDealId,
+      TYPE_ID: 6,              // звонок/дело
+      SUBJECT: 'Пролонгация: ' + title + ' — полис до ' + dealEndStr,
+      DESCRIPTION: activityDesc,
       RESPONSIBLE_ID: sourceDeal.ASSIGNED_BY_ID,
       DEADLINE: deadline.toISOString(),
-      UF_CRM_TASK: [`D_${newDealId}`],
-      PRIORITY: sourceDeal._hasComment ? '2' : '1'
+      COMPLETED: 'N',
+      PRIORITY: sourceDeal._hasComment ? 2 : 1,
+      COMMUNICATIONS: [{
+        VALUE: sourceDeal.CONTACT_ID ? sourceDeal.CONTACT_ID : '',
+        ENTITY_TYPE_ID: 3,    // контакт
+        ENTITY_ID: sourceDeal.CONTACT_ID || 0
+      }]
     }
   });
 
+  addLog('ok', 'Создана пролонгация #' + newDealId + ' + дело для: ' + title);
   return newDealId;
 }
 
@@ -1474,57 +1528,39 @@ function buildMessage(deal) {
   const policyEnd = deal._policyEnd;
   const type = deal._type;
   const endStr = policyEnd ? formatDate(policyEnd) : 'скоро';
-  const days = deal._daysUntil;
-  const daysStr = days !== null && days > 0 ? ` (через ${days} дн.)` : '';
-  const sk = deal._sk || '';
   const managerName = MANAGERS[deal.ASSIGNED_BY_ID] || '';
   const firstName = managerName.split(' ')[0] || '';
 
   if (type === 'ИПОТЕКА') {
-    return `Здравствуйте, ${name}!
-
-Срок действия вашего полиса ипотечного страхования заканчивается ${endStr}${daysStr}.
-
-Мы уже готовим предложение по продлению — подберём лучшие условия и оформим всё быстро, без лишних хлопот с вашей стороны.
-
-Удобно ли вам обсудить это сейчас?
-
-С уважением, ${firstName}`;
+    return 'Здравствуйте, ' + name + '!' +
+      '\n\nСрок действия вашего полиса ипотечного страхования заканчивается ' + endStr + '.' +
+      '\n\nДля подготовки расчёта прошу уточнить:' +
+      '\n— актуален ли остаток задолженности по ипотеке на сегодня?' +
+      '\n— изменились ли личные данные (паспорт, адрес прописки)?' +
+      '\n\nКак только получу информацию — сразу подберу лучшие условия и подготовлю предложение.' +
+      '\n\nС уважением, ' + firstName;
   }
 
   if (type === 'КАСКО' || type === 'КАСКО_ЛИД') {
-    return `Здравствуйте, ${name}!
-
-Срок действия вашего полиса КАСКО${sk ? ' (' + sk + ')' : ''} заканчивается ${endStr}${daysStr}.
-
-Мы готовы подобрать выгодные условия на следующий год — сравним предложения нескольких страховых компаний и найдём лучшую цену.
-
-Удобно ли вам обсудить продление сейчас?
-
-С уважением, ${firstName}`;
+    return 'Здравствуйте, ' + name + '!' +
+      '\n\nСрок действия вашего полиса КАСКО заканчивается ' + endStr + '.' +
+      '\n\nДля расчёта продления прошу подтвердить — актуальны ли данные по автомобилю и водителям, или что-то изменилось?' +
+      '\n\nПодберём лучшие условия и оформим быстро.' +
+      '\n\nС уважением, ' + firstName;
   }
 
   if (type === 'ОСАГО') {
-    return `Здравствуйте, ${name}!
-
-Срок действия вашего полиса ОСАГО заканчивается ${endStr}${daysStr}.
-
-Мы оформим продление быстро и без очередей — пришлите, пожалуйста, актуальные данные документов, если что-то изменилось.
-
-Удобно ли вам сейчас?
-
-С уважением, ${firstName}`;
+    return 'Здравствуйте, ' + name + '!' +
+      '\n\nСрок действия вашего полиса ОСАГО заканчивается ' + endStr + '.' +
+      '\n\nДля расчёта продления прошу подтвердить — актуальны ли данные по автомобилю и водителям, или что-то изменилось?' +
+      '\n\nС уважением, ' + firstName;
   }
 
-  return `Здравствуйте, ${name}!
-
-Срок действия вашего страхового полиса заканчивается ${endStr}${daysStr}.
-
-Мы готовы помочь с продлением — подберём выгодные условия и всё оформим быстро.
-
-Удобно ли вам обсудить это сейчас?
-
-С уважением, ${firstName}`;
+  return 'Здравствуйте, ' + name + '!' +
+    '\n\nСрок действия вашего страхового полиса заканчивается ' + endStr + '.' +
+    '\n\nМы готовы помочь с продлением — подберём выгодные условия и оформим быстро.' +
+    '\n\nУдобно ли вам обсудить это сейчас?' +
+    '\n\nС уважением, ' + firstName;
 }
 
 // ===== DEALS TABLE =====
