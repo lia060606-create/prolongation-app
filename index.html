@@ -1308,7 +1308,7 @@ async function loadDeals() {
     // Real comment field (COMMENTS = BitrixGPT, use UF_CRM_1668776684344)
     const commentRaw = (d[FIELD_COMMENT_UF] || '').replace(/\[\/?[a-z]+\]/gi,' ').replace(/\s+/g,' ').trim();
     d._commentText = commentRaw;
-    d._hasComment = !!commentRaw;
+    d._hasComment = !!(commentRaw && commentRaw.trim() && commentRaw !== 'null' && commentRaw !== '0');
 
     // SK and bank
     d._sk = d[FIELD_SK] || '';
@@ -2378,32 +2378,32 @@ async function loadReconcile() {
                'UF_CRM_1611755457413']
     });
 
-    addLog('ok', `Сверка: найдено ${prevDeals.length} сделок за ${prevYear} год`);
+    addLog('ok', 'Сверка: найдено ' + prevDeals.length + ' сделок за период');
 
-    // Step 2: Load all deals from current year (won + in progress) to check prolongations
+    // Step 2: Load ONLY prolongation deals from current year (source=76 or 80)
+    // This is much faster than loading ALL deals
     const curYear = now.getFullYear();
+    const curFilter = { '>=DATE_CREATE': curYear + '-01-01' };
+    curFilter['UF_CRM_1609920495607'] = '76'; // источник = Пролонгация
+
     const curDeals = await bxCallAll('crm.deal.list', {
-      filter: {
-        '>=DATE_CREATE': `${curYear}-01-01`,
-      },
-      select: ['ID','TITLE','CONTACT_ID','CATEGORY_ID','DATE_CREATE','ASSIGNED_BY_ID']
+      filter: curFilter,
+      select: ['ID','TITLE','CONTACT_ID','CATEGORY_ID','DATE_CREATE','UF_CRM_1609923110282']
     });
 
-    addLog('ok', `Сверка: найдено ${curDeals.length} сделок за ${curYear} год`);
+    addLog('ok', 'Сверка: найдено ' + curDeals.length + ' пролонгаций в ' + curYear + ' году');
 
-    // Build lookup: contact_id + category -> has prolongation in current year
-    const prolongSet = new Set();
+    // Build lookup sets
+    const prolongByPolicyNum = new Set(
+      curDeals.filter(d => d['UF_CRM_1609923110282']).map(d => d['UF_CRM_1609923110282'].toString().trim())
+    );
+    const prolongByContact = new Set(
+      curDeals.filter(d => d.CONTACT_ID).map(d => d.CONTACT_ID + '_' + d.CATEGORY_ID)
+    );
+    const prolongByTitle = new Set();
     curDeals.forEach(d => {
-      if (d.CONTACT_ID) {
-        prolongSet.add(d.CONTACT_ID + '_' + d.CATEGORY_ID);
-      }
-    });
-
-    // Also match by title similarity (first 3 words of FIO)
-    const prolongTitleSet = new Set();
-    curDeals.forEach(d => {
-      const key = (d.TITLE || '').split(' ').slice(0,3).join(' ').toLowerCase().trim();
-      if (key.length > 5) prolongTitleSet.add(key + '_' + d.CATEGORY_ID);
+      const key = (d.TITLE||'').split(' ').slice(0,3).join(' ').toLowerCase().trim();
+      if (key.length > 5) prolongByTitle.add(key + '_' + d.CATEGORY_ID);
     });
 
     // Step 3: Mark each prev deal as having prolongation or not
@@ -2411,16 +2411,16 @@ async function loadReconcile() {
       d.CATEGORY_NAME = catMap[d.CATEGORY_ID] || '';
       d._type = getPipelineType(d);
 
-      // Check by contact_id + category
-      const contactKey = (d.CONTACT_ID || '') + '_' + d.CATEGORY_ID;
-      const hasByContact = d.CONTACT_ID && prolongSet.has(contactKey);
+      const policyNum = (d['UF_CRM_1609923110282']||'').toString().trim();
+      const contactKey = (d.CONTACT_ID||'') + '_' + d.CATEGORY_ID;
+      const titleKey = (d.TITLE||'').split(' ').slice(0,3).join(' ').toLowerCase().trim() + '_' + d.CATEGORY_ID;
 
-      // Check by title
-      const titleKey = (d.TITLE || '').split(' ').slice(0,3).join(' ').toLowerCase().trim() + '_' + d.CATEGORY_ID;
-      const hasByTitle = titleKey.length > 5 && prolongTitleSet.has(titleKey);
+      const hasByNum     = policyNum && prolongByPolicyNum.has(policyNum);
+      const hasByContact = d.CONTACT_ID && prolongByContact.has(contactKey);
+      const hasByTitle   = titleKey.length > 5 && prolongByTitle.has(titleKey);
 
-      d._hasProlongation = hasByContact || hasByTitle;
-      d._matchType = hasByContact ? 'контакт' : hasByTitle ? 'ФИО' : null;
+      d._hasProlongation = hasByNum || hasByContact || hasByTitle;
+      d._matchType = hasByNum ? 'номер полиса' : hasByContact ? 'контакт' : hasByTitle ? 'ФИО' : null;
       return d;
     });
 
