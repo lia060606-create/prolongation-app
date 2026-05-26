@@ -1446,7 +1446,7 @@ async function loadDeals() {
   // Fill manager filter
   const mf = document.getElementById('filter-manager');
   if (mf) {
-    const names = [...new Set(ALL_DEALS.filter(d => !EXCLUDED_USER_IDS.includes(String(d.ASSIGNED_BY_ID))).map(d => MANAGERS[d.ASSIGNED_BY_ID]).filter(Boolean))];
+    const names = [...new Set(ALL_DEALS.map(d => MANAGERS[d.ASSIGNED_BY_ID]).filter(Boolean))];
     mf.innerHTML = '<option value="">Все менеджеры</option>' + names.map(n => `<option value="${n}">${n}</option>`).join('');
   }
 
@@ -1888,7 +1888,7 @@ async function createSingleProlongation(deal) {
 
 // ===== POINTS CALCULATION =====
 // User ID 9 = Анна Шишлова — exclude from points
-const EXCLUDED_USER_IDS = ['9'];
+const EXCLUDED_USER_IDS = []; // no exclusions
 
 // Known managers map (ID → display name)
 // Will be populated from user.get API call
@@ -1938,7 +1938,7 @@ async function loadPoints() {
     });
 
     // Filter out excluded users
-    const filtered = wonDeals.filter(d => !EXCLUDED_USER_IDS.includes(String(d.ASSIGNED_BY_ID)));
+    const filtered = wonDeals;
 
     // Enrich deals
     filtered.forEach(d => {
@@ -2566,7 +2566,7 @@ async function loadReconcile() {
     const mgrDiv = document.getElementById('rec-mgr-filters');
     if (mgrDiv) {
       const names = [...new Set(REC_ALL
-        .filter(d => !EXCLUDED_USER_IDS.includes(String(d.ASSIGNED_BY_ID)))
+        
         .map(d => MANAGERS[d.ASSIGNED_BY_ID]).filter(Boolean))].sort();
       mgrDiv.innerHTML = names.map(n => {
         const firstName = n.split(' ')[0];
@@ -2767,7 +2767,7 @@ async function loadFinances() {
     const byManager = {};
     const managerIds = [...new Set(allDeals.map(d => d.ASSIGNED_BY_ID))];
 
-    managerIds.filter(mid => !EXCLUDED_USER_IDS.includes(String(mid))).forEach(mid => {
+    managerIds.forEach(mid => {
       const deals = allDeals.filter(d => d.ASSIGNED_BY_ID === mid);
       const wonDeals = deals.filter(d => d._isWon);
       const failedDeals = deals.filter(d => d._isFailed);
@@ -3062,7 +3062,7 @@ async function loadFunnel() {
     // Fill manager filter
     const mf = document.getElementById('fn-filter-mgr');
     if (mf) {
-      const names = [...new Set(FN_ALL.filter(d=>!EXCLUDED_USER_IDS.includes(String(d.ASSIGNED_BY_ID))).map(d=>MANAGERS[d.ASSIGNED_BY_ID]).filter(Boolean))];
+      const names = [...new Set(FN_ALL.map(d=>MANAGERS[d.ASSIGNED_BY_ID]).filter(Boolean))];
       mf.innerHTML = '<option value="">Все менеджеры</option>' + names.map(n=>'<option value="'+n+'">'+n+'</option>').join('');
     }
 
@@ -3081,7 +3081,6 @@ function filterFunnel() {
   const mgrF    = document.getElementById('fn-filter-mgr')    ? document.getElementById('fn-filter-mgr').value    : '';
 
   FN_FILTERED = FN_ALL.filter(d => {
-    if (EXCLUDED_USER_IDS.includes(String(d.ASSIGNED_BY_ID))) return false;
     if (statusF === 'S' && d._status !== 'S') return false;
     if (statusF === 'F' && d._status !== 'F') return false;
     if (statusF === 'P' && d._status !== 'P') return false;
