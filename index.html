@@ -791,18 +791,17 @@
           <button class="btn btn-secondary btn-sm" onclick="setRecPeriod('q1_2026')">Янв-Мар 2026</button>
           <button class="btn btn-secondary btn-sm" onclick="setRecPeriod('year_2025')">Весь 2025</button>
         </div>
-        <select class="filter-select" id="rec-filter-type" onchange="filterReconcile()">
-          <option value="">Все воронки</option>
+        <select class="filter-select" id="rec-filter-type" multiple onchange="filterReconcile()" style="height:36px;min-width:140px" title="Ctrl+клик для выбора нескольких">
           <option value="ИПОТЕКА">Ипотека</option>
           <option value="КАСКО">КАСКО</option>
           <option value="КАСКО_ЛИД">КАСКО ЛИД</option>
           <option value="ОСАГО">ОСАГО</option>
           <option value="ПРОЧЕЕ">Прочее</option>
         </select>
-        <select class="filter-select" id="rec-filter-manager" onchange="filterReconcile()">
-          <option value="">Все менеджеры</option>
+        <select class="filter-select" id="rec-filter-manager" multiple onchange="filterReconcile()" style="height:36px;min-width:160px" title="Ctrl+клик для выбора нескольких">
         </select>
         <button class="btn btn-primary btn-sm" onclick="loadReconcile()">🔄 Проверить</button>
+        <button class="btn btn-primary btn-sm" id="rec-create-all-btn" style="display:none" onclick="createAllRecProlongations()">▶ Создать все</button>
         <button class="btn btn-secondary btn-sm" id="rec-export-btn" style="display:none" onclick="exportReconcileExcel()">📥 Excel</button>
         <button class="btn btn-secondary btn-sm" id="rec-pdf-btn" style="display:none" onclick="exportReconcilePDF()">📄 PDF</button>
       </div>
@@ -2617,8 +2616,10 @@ function renderReconcile() {
   // Show export buttons
   const expBtn = document.getElementById('rec-export-btn');
   const pdfBtn = document.getElementById('rec-pdf-btn');
+  const createAllBtn = document.getElementById('rec-create-all-btn');
   if (expBtn) expBtn.style.display = '';
   if (pdfBtn) pdfBtn.style.display = '';
+  if (createAllBtn) createAllBtn.style.display = '';
   // Render charts
 }
 
