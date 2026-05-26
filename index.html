@@ -1618,11 +1618,11 @@ async function createProlongationDeal(sourceDeal) {
   if (deadline.getDay() === 6) deadline.setDate(deadline.getDate() + 2); // Saturday -> Monday
   deadline.setHours(9, 0, 0, 0);
 
-  // Format date for Bitrix24 in local time (not UTC) — avoids timezone shift
+  // Format date for Bitrix24 REST API: DD.MM.YYYY HH:MM:SS
   function formatBxDate(d) {
     const pad = n => String(n).padStart(2, '0');
-    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
-      + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + '+00:00';
+    return pad(d.getDate()) + '.' + pad(d.getMonth()+1) + '.' + d.getFullYear()
+      + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
   }
 
   // Create дело (CRM activity type 2 = звонок, shows in CRM feed)
