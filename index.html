@@ -2441,6 +2441,35 @@ function setRecPeriod(period) {
   if (toEl) toEl.value = to;
 }
 
+let REC_SAVED_FILTERS = { types: [], managers: [], dateFrom: '', dateTo: '' };
+
+function getRecFilterValues() {
+  const typeButtons = document.querySelectorAll('.rec-filter-btn[data-group="type"].active');
+  const mgrButtons = document.querySelectorAll('.rec-filter-btn[data-group="mgr"].active');
+  return {
+    types: Array.from(typeButtons).map(b => b.dataset.val),
+    managers: Array.from(mgrButtons).map(b => b.dataset.val)
+  };
+}
+
+function toggleRecFilter(btn) {
+  btn.classList.toggle('active');
+  filterReconcile();
+}
+
+function restoreRecFilters() {
+  if (REC_SAVED_FILTERS.types.length) {
+    document.querySelectorAll('.rec-filter-btn[data-group="type"]').forEach(b => {
+      b.classList.toggle('active', REC_SAVED_FILTERS.types.includes(b.dataset.val));
+    });
+  }
+  if (REC_SAVED_FILTERS.managers.length) {
+    document.querySelectorAll('.rec-filter-btn[data-group="mgr"]').forEach(b => {
+      b.classList.toggle('active', REC_SAVED_FILTERS.managers.includes(b.dataset.val));
+    });
+  }
+}
+
 async function loadReconcile() {
   if (!CONFIG.webhook) { alert('Настройте webhook'); return; }
 
