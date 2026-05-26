@@ -2470,6 +2470,50 @@ function restoreRecFilters() {
   }
 }
 
+async function createAllRecProlongations() {
+  const missing = REC_FILTERED.filter(d => !d._hasProlongation);
+  if (!missing.length) { alert('Нет сделок для создания'); return; }
+  if (!confirm('Создать пролонгации для ' + missing.length + ' сделок?')) return;
+
+  const btn = document.getElementById('rec-create-all-btn');
+  if (btn) btn.disabled = true;
+
+  let done = 0, errors = 0;
+  for (const deal of missing) {
+    try {
+      await createProlongationDeal(deal);
+      deal._hasProlongation = true;
+      deal._matchType = 'создана сейчас';
+      done++;
+      if (btn) btn.textContent = '▶ Создано ' + done + '/' + missing.length;
+    } catch(e) {
+      errors++;
+      addLog('err', 'Ошибка для ' + deal.TITLE + ': ' + e.message);
+    }
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = '▶ Создать все'; }
+  filterReconcile();
+  restoreRecFilters();
+  renderReconcile();
+  alert('✓ Создано: ' + done + (errors ? ' | Ошибок: ' + errors : ''));
+}
+
+async function createRecProlongation(dealId) {
+  const deal = REC_ALL.find(d => String(d.ID) === String(dealId));
+  if (!deal) return;
+  try {
+    await createProlongationDeal(deal);
+    deal._hasProlongation = true;
+    deal._matchType = 'создана сейчас';
+    filterReconcile();
+    restoreRecFilters();
+    renderReconcile();
+  } catch(e) {
+    alert('Ошибка: ' + e.message);
+  }
+}
+
 async function loadReconcile() {
   if (!CONFIG.webhook) { alert('Настройте webhook'); return; }
 
