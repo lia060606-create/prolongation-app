@@ -649,6 +649,13 @@
           <button class="btn btn-sm" id="pf-3days" onclick="setProlPeriod('3days')" style="background:transparent;color:var(--text2)">+3 дня</button>
           <button class="btn btn-sm" id="pf-week" onclick="setProlPeriod('week')" style="background:transparent;color:var(--text2)">Неделя</button>
           <button class="btn btn-sm" id="pf-month" onclick="setProlPeriod('month')" style="background:transparent;color:var(--text2)">Месяц</button>
+          <button class="btn btn-sm" id="pf-custom" onclick="setProlPeriod('custom')" style="background:transparent;color:var(--text2)">Период</button>
+        </div>
+        <div id="pf-custom-dates" style="display:none;align-items:center;gap:6px">
+          <span style="font-size:12px;color:var(--text2)">с</span>
+          <input type="date" id="pf-date-from" style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);padding:4px 8px;color:var(--text);font-size:12px;font-family:inherit" onchange="filterDeals()">
+          <span style="font-size:12px;color:var(--text2)">по</span>
+          <input type="date" id="pf-date-to" style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);padding:4px 8px;color:var(--text);font-size:12px;font-family:inherit" onchange="filterDeals()">
         </div>
         <select class="filter-select" id="filter-type" onchange="filterDeals()">
           <option value="">Все воронки</option>
@@ -807,11 +814,11 @@
           <button class="btn btn-secondary btn-sm" onclick="setRecPeriod('year_2025')">Весь 2025</button>
         </div>
         <div id="rec-type-filters" style="display:flex;gap:4px;flex-wrap:wrap">
-          <button class="rec-filter-btn active" data-group="type" data-val="ИПОТЕКА" onclick="toggleRecFilter(this)">Ипотека</button>
-          <button class="rec-filter-btn active" data-group="type" data-val="КАСКО" onclick="toggleRecFilter(this)">КАСКО</button>
-          <button class="rec-filter-btn active" data-group="type" data-val="КАСКО_ЛИД" onclick="toggleRecFilter(this)">КАСКО ЛИД</button>
-          <button class="rec-filter-btn active" data-group="type" data-val="ОСАГО" onclick="toggleRecFilter(this)">ОСАГО</button>
-          <button class="rec-filter-btn active" data-group="type" data-val="ПРОЧЕЕ" onclick="toggleRecFilter(this)">Прочее</button>
+          <button class="rec-filter-btn" data-group="type" data-val="ИПОТЕКА" onclick="toggleRecFilter(this)">Ипотека</button>
+          <button class="rec-filter-btn" data-group="type" data-val="КАСКО" onclick="toggleRecFilter(this)">КАСКО</button>
+          <button class="rec-filter-btn" data-group="type" data-val="КАСКО_ЛИД" onclick="toggleRecFilter(this)">КАСКО ЛИД</button>
+          <button class="rec-filter-btn" data-group="type" data-val="ОСАГО" onclick="toggleRecFilter(this)">ОСАГО</button>
+          <button class="rec-filter-btn" data-group="type" data-val="ПРОЧЕЕ" onclick="toggleRecFilter(this)">Прочее</button>
         </div>
         <div id="rec-mgr-filters" style="display:flex;gap:4px;flex-wrap:wrap">
         </div>
@@ -1621,7 +1628,7 @@ async function createProlongationDeal(sourceDeal) {
     'fields[DESCRIPTION]': activityDesc,
     'fields[DESCRIPTION_TYPE]': '1',
     'fields[RESPONSIBLE_ID]': String(sourceDeal.ASSIGNED_BY_ID),
-    'fields[DEADLINE]': deadline.toISOString().replace('.000Z', '+00:00'),
+    'fields[DEADLINE]': deadline.toISOString(),
     'fields[COMPLETED]': 'N',
     'fields[PRIORITY]': sourceDeal._hasComment ? '2' : '1'
   };
@@ -1707,14 +1714,15 @@ let PROL_PERIOD = 'today'; // today, 3days, week, month
 
 function setProlPeriod(period) {
   PROL_PERIOD = period;
-  // Update button styles
-  ['today','3days','week','month'].forEach(p => {
+  ['today','3days','week','month','custom'].forEach(p => {
     const btn = document.getElementById('pf-' + p);
     if (btn) {
       btn.style.background = p === period ? 'var(--accent)' : 'transparent';
       btn.style.color = p === period ? '#fff' : 'var(--text2)';
     }
   });
+  const customDates = document.getElementById('pf-custom-dates');
+  if (customDates) customDates.style.display = period === 'custom' ? 'flex' : 'none';
   filterDeals();
 }
 
@@ -1759,8 +1767,18 @@ function filterDeals() {
         // ±7 дней от порога
         return days >= (d._threshold - 7) && days <= (d._threshold + 7);
       case 'month':
-        // Все у кого полис кончается в ближайшие 90 дней
         return days >= 0 && days <= 90;
+      case 'custom': {
+        const fromEl = document.getElementById('pf-date-from');
+        const toEl = document.getElementById('pf-date-to');
+        if (!fromEl || !fromEl.value || !toEl || !toEl.value) return true;
+        const policyEndDate = d._policyEnd ? new Date(d._policyEnd) : null;
+        if (!policyEndDate) return false;
+        const from = new Date(fromEl.value);
+        const to = new Date(toEl.value);
+        to.setHours(23,59,59);
+        return policyEndDate >= from && policyEndDate <= to;
+      }
       default:
         return days >= (d._threshold - 1) && days <= (d._threshold + 1);
     }
@@ -2614,7 +2632,7 @@ async function loadReconcile() {
         .map(d => MANAGERS[d.ASSIGNED_BY_ID]).filter(Boolean))].sort();
       mgrDiv.innerHTML = names.map(n => {
         const firstName = n.split(' ')[0];
-        return '<button class="rec-filter-btn active" data-group="mgr" data-val="' + n + '" onclick="toggleRecFilter(this)">' + firstName + '</button>';
+        return '<button class="rec-filter-btn" data-group="mgr" data-val="' + n + '" onclick="toggleRecFilter(this)">' + firstName + '</button>';
       }).join('');
     }
 
@@ -2635,14 +2653,10 @@ function filterReconcile() {
   if (fromEl) REC_SAVED_FILTERS.dateFrom = fromEl.value;
   if (toEl) REC_SAVED_FILTERS.dateTo = toEl.value;
 
-  const totalTypeBtns = document.querySelectorAll('.rec-filter-btn[data-group="type"]').length;
-  const totalMgrBtns = document.querySelectorAll('.rec-filter-btn[data-group="mgr"]').length;
-  const allTypesOn = types.length === 0 || types.length === totalTypeBtns;
-  const allMgrsOn = managers.length === 0 || managers.length === totalMgrBtns;
-
+  // Empty selection = show all; has selection = show only selected
   let list = [...REC_ALL];
-  if (!allTypesOn) list = list.filter(d => types.includes(d._type));
-  if (!allMgrsOn) list = list.filter(d => managers.includes(MANAGERS[d.ASSIGNED_BY_ID]||''));
+  if (types.length > 0) list = list.filter(d => types.includes(d._type));
+  if (managers.length > 0) list = list.filter(d => managers.includes(MANAGERS[d.ASSIGNED_BY_ID]||''));
   REC_FILTERED = list;
   renderReconcile();
 }
