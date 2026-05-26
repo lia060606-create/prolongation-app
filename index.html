@@ -2,7 +2,6 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-  
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Пролонгация — Шишлов</title>
 <style>
@@ -497,7 +496,7 @@
   border-color: var(--accent);
 }
 </style>
-<script src="//api.bitrix24.com/api/v1/"></script>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
@@ -1619,6 +1618,13 @@ async function createProlongationDeal(sourceDeal) {
   if (deadline.getDay() === 6) deadline.setDate(deadline.getDate() + 2); // Saturday -> Monday
   deadline.setHours(9, 0, 0, 0);
 
+  // Format date for Bitrix24 in local time (not UTC) — avoids timezone shift
+  function formatBxDate(d) {
+    const pad = n => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
+      + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + '+00:00';
+  }
+
   // Create дело (CRM activity type 2 = звонок, shows in CRM feed)
   const activityFields = {
     'fields[OWNER_TYPE_ID]': '2',
@@ -1629,7 +1635,9 @@ async function createProlongationDeal(sourceDeal) {
     'fields[DESCRIPTION]': activityDesc,
     'fields[DESCRIPTION_TYPE]': '1',
     'fields[RESPONSIBLE_ID]': String(sourceDeal.ASSIGNED_BY_ID),
-    'fields[DEADLINE]': deadline.toISOString(),
+    'fields[START_TIME]': formatBxDate(deadline),
+    'fields[END_TIME]': formatBxDate(deadline),
+    'fields[DEADLINE]': formatBxDate(deadline),
     'fields[COMPLETED]': 'N',
     'fields[PRIORITY]': sourceDeal._hasComment ? '2' : '1'
   };
