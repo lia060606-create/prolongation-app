@@ -1118,6 +1118,20 @@ function getBxEndpoint(method) {
 }
 
 // Build query string from params object
+// Parse Bitrix24 date string (handles '2026-06-30T03:00:00+03:00' and '2026-06-30')
+function parseB24Date(raw) {
+  if (!raw) return null;
+  // Strip timezone and parse as local date to avoid UTC shift
+  const clean = raw.toString().replace(/T.*/, '');
+  const parts = clean.split('-');
+  if (parts.length === 3) {
+    const d = new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
+    return isNaN(d) ? null : d;
+  }
+  const d = new Date(raw);
+  return isNaN(d) ? null : d;
+}
+
 function buildQueryString(obj, prefix) {
   var parts = [];
   for (var k in obj) {
@@ -1373,13 +1387,7 @@ async function loadDeals() {
     d._type = getPipelineType(d);
 
     // Policy end date — use exact field, always store as Date object
-    const rawEnd = d[FIELD_POLICY_END];
-    let policyEnd = null;
-    if (rawEnd) {
-      const pd = new Date(rawEnd);
-      if (!isNaN(pd)) policyEnd = pd;
-    }
-    d._policyEnd = policyEnd; // always Date or null
+    d._policyEnd = parseB24Date(d[FIELD_POLICY_END]);
     d._policyEndField = FIELD_POLICY_END;
 
     // Policy start date
@@ -2009,8 +2017,7 @@ async function loadPoints() {
         || d.SOURCE_ID === 'REPEAT_SALE';
       // Set _policyEnd so createProlongationDeal can use it
       const rawEnd = d[FIELD_POLICY_END];
-      d._policyEnd = rawEnd ? new Date(rawEnd) : null;
-      if (d._policyEnd && isNaN(d._policyEnd)) d._policyEnd = null;
+      d._policyEnd = rawEnd ? parseB24Date(rawEnd) : null;
       // Also set comment fields
       const commentRaw = (d[FIELD_COMMENT_UF] || '').replace(/\[\/?[a-z]+\]/gi,' ').replace(/\s+/g,' ').trim();
       d._commentText = commentRaw;
