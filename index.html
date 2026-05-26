@@ -2613,6 +2613,14 @@ async function loadReconcile() {
       (cats || []).forEach(c => { catMap[c.ID] = c.NAME; });
     } catch(e) {}
 
+    // Load managers if needed
+    if (!Object.keys(MANAGERS).length) {
+      try {
+        const users = await bxCall('user.get', { FILTER: { ACTIVE: true } });
+        (users || []).forEach(u => { MANAGERS[u.ID] = (u.NAME + ' ' + u.LAST_NAME).trim(); });
+      } catch(e) {}
+    }
+
     // Step 1: Load all won deals from previous year
     addLog('ok', `Сверка: загружаем успешные сделки ${prevYear} года...`);
     const prevDeals = await bxCallAll('crm.deal.list', {
@@ -2631,7 +2639,16 @@ async function loadReconcile() {
                'UF_CRM_1621248599553','UF_CRM_1621249661361','UF_CRM_1668776684344',
                'UF_CRM_1670774455887','UF_CRM_1679484014422','UF_CRM_1679484171126',
                'UF_CRM_1621335244025','UF_CRM_1643644504930','UF_CRM_1739183976913',
-               'UF_CRM_1739184006572']
+               'UF_CRM_1739184006572','UF_CRM_1630331231491','UF_CRM_1637260544163',
+               'UF_CRM_1621251272586']
+    });
+
+    // Enrich with _policyEnd for createProlongationDeal
+    prevDeals.forEach(d => {
+      d._policyEnd = parseB24Date(d[FIELD_POLICY_END]);
+      const commentRaw = (d['UF_CRM_1668776684344'] || '').replace(/\[\/?[a-z]+\]/gi,' ').replace(/\s+/g,' ').trim();
+      d._commentText = commentRaw;
+      d._hasComment = !!(commentRaw && commentRaw !== 'null' && commentRaw !== '0');
     });
 
     addLog('ok', 'Сверка: найдено ' + prevDeals.length + ' сделок за период');
