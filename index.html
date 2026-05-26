@@ -2533,11 +2533,16 @@ async function loadReconcile() {
       return d;
     });
 
-    // Update manager filter
-    const mf = document.getElementById('rec-filter-manager');
-    if (mf) {
-      const names = [...new Set(REC_ALL.map(d => MANAGERS[d.ASSIGNED_BY_ID]).filter(Boolean))];
-      mf.innerHTML = '<option value="">Все менеджеры</option>' + names.map(n => `<option value="${n}">${n}</option>`).join('');
+    // Update manager filter buttons
+    const mgrDiv = document.getElementById('rec-mgr-filters');
+    if (mgrDiv) {
+      const names = [...new Set(REC_ALL
+        .filter(d => !EXCLUDED_USER_IDS.includes(String(d.ASSIGNED_BY_ID)))
+        .map(d => MANAGERS[d.ASSIGNED_BY_ID]).filter(Boolean))].sort();
+      mgrDiv.innerHTML = names.map(n => {
+        const firstName = n.split(' ')[0];
+        return '<button class="rec-filter-btn active" data-group="mgr" data-val="' + n + '" onclick="toggleRecFilter(this)">' + firstName + '</button>';
+      }).join('');
     }
 
     filterReconcile();
@@ -2549,13 +2554,22 @@ async function loadReconcile() {
 }
 
 function filterReconcile() {
-  const typeF = document.getElementById('rec-filter-type').value;
-  const mgrF = document.getElementById('rec-filter-manager').value;
+  const { types, managers } = getRecFilterValues();
+  REC_SAVED_FILTERS.types = types;
+  REC_SAVED_FILTERS.managers = managers;
+  const fromEl = document.getElementById('rec-date-from');
+  const toEl = document.getElementById('rec-date-to');
+  if (fromEl) REC_SAVED_FILTERS.dateFrom = fromEl.value;
+  if (toEl) REC_SAVED_FILTERS.dateTo = toEl.value;
+
+  const totalTypeBtns = document.querySelectorAll('.rec-filter-btn[data-group="type"]').length;
+  const totalMgrBtns = document.querySelectorAll('.rec-filter-btn[data-group="mgr"]').length;
+  const allTypesOn = types.length === 0 || types.length === totalTypeBtns;
+  const allMgrsOn = managers.length === 0 || managers.length === totalMgrBtns;
 
   let list = [...REC_ALL];
-  if (typeF) list = list.filter(d => d._type === typeF);
-  if (mgrF) list = list.filter(d => MANAGERS[d.ASSIGNED_BY_ID] === mgrF);
-
+  if (!allTypesOn) list = list.filter(d => types.includes(d._type));
+  if (!allMgrsOn) list = list.filter(d => managers.includes(MANAGERS[d.ASSIGNED_BY_ID]||''));
   REC_FILTERED = list;
   renderReconcile();
 }
