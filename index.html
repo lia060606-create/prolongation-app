@@ -1623,6 +1623,7 @@ async function createProlongationDeal(sourceDeal) {
     [FIELD_POLICY_START]: policyEndStr, // новый полис начинается с даты окончания старого
   };
 
+  console.log('Creating deal with fields:', JSON.stringify({end: newDeal['UF_CRM_1609921954607'], start: newDeal['UF_CRM_1609921922120'], num: newDeal['UF_CRM_1630331231491']}));
   const newDealId = await bxCall('crm.deal.add', { fields: newDeal });
 
   // Create ДЕЛО (CRM activity) instead of task
