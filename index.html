@@ -1561,7 +1561,14 @@ async function createProlongationDeal(sourceDeal) {
   }
 
   // All copied fields from source deal
-  const policyEndStr = policyEnd ? (new Date(policyEnd)).toISOString().split('T')[0] : '';
+  function toB24Date(d) {
+    if (!d) return '';
+    const dt = new Date(d);
+    if (isNaN(dt)) return '';
+    const pad = n => String(n).padStart(2, '0');
+    return pad(dt.getDate()) + '.' + pad(dt.getMonth()+1) + '.' + dt.getFullYear();
+  }
+  const policyEndStr = toB24Date(policyEnd);
 
   const newDeal = {
     TITLE: title,
@@ -1580,7 +1587,7 @@ async function createProlongationDeal(sourceDeal) {
       const d = new Date(oldDate);
       if (isNaN(d)) return '';
       d.setFullYear(d.getFullYear() + 1);
-      return d.toISOString().split('T')[0];
+      return toB24Date(d);
     })(),
     'UF_CRM_1611829653533': sourceDeal['UF_CRM_1611829653533'] || '', // Город клиента
     'UF_CRM_1606650631517': sourceDeal['UF_CRM_1606650631517'] || '', // СК ОСАГО
