@@ -1572,7 +1572,8 @@ async function createProlongationDeal(sourceDeal) {
     const dt = new Date(d);
     if (isNaN(dt)) return '';
     const pad = n => String(n).padStart(2, '0');
-    return pad(dt.getDate()) + '.' + pad(dt.getMonth()+1) + '.' + dt.getFullYear();
+    // Bitrix UF date fields require YYYY-MM-DD format
+    return dt.getFullYear() + '-' + pad(dt.getMonth()+1) + '-' + pad(dt.getDate());
   }
   const policyEndStr = toB24Date(policyEnd);
 
