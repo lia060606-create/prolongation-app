@@ -1606,6 +1606,9 @@ async function createProlongationDeal(sourceDeal) {
   // Deadline = today + 1 day (deal should be processed today/tomorrow)
   const deadline = new Date();
   deadline.setDate(deadline.getDate() + 1);
+  // Set to next weekday 9am
+  if (deadline.getDay() === 0) deadline.setDate(deadline.getDate() + 1); // Sunday -> Monday
+  if (deadline.getDay() === 6) deadline.setDate(deadline.getDate() + 2); // Saturday -> Monday
   deadline.setHours(9, 0, 0, 0);
 
   // Create дело (CRM activity type 2 = звонок, shows in CRM feed)
@@ -2471,8 +2474,16 @@ async function loadReconcile() {
         '<=CLOSEDATE': dateTo
       },
       select: ['ID','TITLE','ASSIGNED_BY_ID','CATEGORY_ID','CLOSEDATE',
-               'CONTACT_ID','OPPORTUNITY','UF_CRM_1609921954607',
-               'UF_CRM_1611755457413']
+               'CONTACT_ID','OPPORTUNITY','SOURCE_ID','IS_RETURN_CUSTOMER',
+               'UF_CRM_1609921954607','UF_CRM_1609921922120','UF_CRM_1609920495607',
+               'UF_CRM_1609923110282','UF_CRM_1611755457413','UF_CRM_1611827119611',
+               'UF_CRM_1611829653533','UF_CRM_1606650372269','UF_CRM_1610107289284',
+               'UF_CRM_1610107379506','UF_CRM_1606651083093','UF_CRM_1609923363363',
+               'UF_CRM_1606650631517','UF_CRM_1730370141733','UF_CRM_1621250213416',
+               'UF_CRM_1621248599553','UF_CRM_1621249661361','UF_CRM_1668776684344',
+               'UF_CRM_1670774455887','UF_CRM_1679484014422','UF_CRM_1679484171126',
+               'UF_CRM_1621335244025','UF_CRM_1643644504930','UF_CRM_1739183976913',
+               'UF_CRM_1739184006572']
     });
 
     addLog('ok', 'Сверка: найдено ' + prevDeals.length + ' сделок за период');
@@ -3139,8 +3150,9 @@ function exportReconcileExcel() {
   // Get current filter values for filename
   const dateFrom = document.getElementById('rec-date-from') ? document.getElementById('rec-date-from').value : '';
   const dateTo = document.getElementById('rec-date-to') ? document.getElementById('rec-date-to').value : '';
-  const typeF = document.getElementById('rec-filter-type') ? document.getElementById('rec-filter-type').value : '';
-  const mgrF = document.getElementById('rec-filter-manager') ? document.getElementById('rec-filter-manager').value : '';
+  const { types: _types, managers: _mgrs } = getRecFilterValues();
+  const typeF = _types.length === 1 ? _types[0] : (_types.length > 1 ? _types.join('+') : '');
+  const mgrF = _mgrs.length === 1 ? _mgrs[0] : (_mgrs.length > 1 ? _mgrs.join('+') : '');
 
   var rows = [['ФИО клиента','Воронка','Дата закрытия','Сумма','Менеджер','Ссылка на сделку']];
   missing.forEach(function(d) {
@@ -3172,8 +3184,9 @@ function exportReconcilePDF() {
   const pct = total > 0 ? Math.round(done/total*100) : 0;
   const dateFrom = document.getElementById('rec-date-from') ? document.getElementById('rec-date-from').value : '';
   const dateTo = document.getElementById('rec-date-to') ? document.getElementById('rec-date-to').value : '';
-  const typeF = document.getElementById('rec-filter-type') ? document.getElementById('rec-filter-type').value : '';
-  const mgrF = document.getElementById('rec-filter-manager') ? document.getElementById('rec-filter-manager').value : '';
+  const { types: _types, managers: _mgrs } = getRecFilterValues();
+  const typeF = _types.length === 1 ? _types[0] : (_types.length > 1 ? _types.join('+') : '');
+  const mgrF = _mgrs.length === 1 ? _mgrs[0] : (_mgrs.length > 1 ? _mgrs.join('+') : '');
 
   const w = window.open('', '_blank');
   w.document.write('<html><head><title>Сверка пролонгаций</title><style>');
