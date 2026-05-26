@@ -1677,6 +1677,8 @@ function buildMessage(deal) {
   const name = parseNameForGreeting(deal.TITLE);
   const policyEnd = deal._policyEnd;
   const type = deal._type;
+  // Debug: log raw field value if date missing
+  if (!policyEnd) console.warn('buildMessage: нет даты полиса для', deal.TITLE, '| raw:', deal[FIELD_POLICY_END]);
   const endStr = policyEnd ? formatDate(policyEnd) : 'скоро';
   const managerName = MANAGERS[deal.ASSIGNED_BY_ID] || '';
   const firstName = managerName.split(' ')[0] || '';
