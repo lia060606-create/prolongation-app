@@ -1096,42 +1096,44 @@ function getBxEndpoint(method) {
   return null;
 }
 
-async function bxCall(method, params = {}) {
-  // Try OAuth via BX24.js first (when running inside Bitrix24)
-  if (window.BX24 && !CONFIG.webhook) {
-    return new Promise((resolve, reject) => {
-      BX24.callMethod(method, params, (result) => {
-        if (result.error()) reject(new Error(result.error().ex.error_description || result.error()));
-        else resolve(result.data());
-      });
-    });
-  }
-  // Fallback to webhook
-  if (!CONFIG.webhook) throw new Error('Webhook не настроен');
-  const url = CONFIG.webhook + method + '.json';
-  const body = new URLSearchParams();
-  function flatten(obj, prefix) {
-    for (var k in obj) {
-      if (!obj.hasOwnProperty(k)) continue;
-      var v = obj[k];
-      var key = prefix ? prefix + '[' + k + ']' : k;
-      if (v === null || v === undefined || v === '') continue; // skip empty
-      if (Array.isArray(v)) {
-        v.forEach(function(item, i) {
-          if (item !== null && item !== undefined) {
-            if (typeof item === 'object') flatten(item, key + '[' + i + ']');
-            else body.append(key + '[' + i + ']', item);
+// Build query string from params object
+function buildQueryString(obj, prefix) {
+  var parts = [];
+  for (var k in obj) {
+    if (!obj.hasOwnProperty(k)) continue;
+    var v = obj[k];
+    var key = prefix ? prefix + '[' + k + ']' : k;
+    if (v === null || v === undefined || v === '') continue;
+    if (Array.isArray(v)) {
+      v.forEach(function(item, i) {
+        if (item !== null && item !== undefined) {
+          if (typeof item === 'object') {
+            parts = parts.concat(buildQueryString(item, key + '[' + i + ']'));
+          } else {
+            parts.push(encodeURIComponent(key + '[' + i + ']') + '=' + encodeURIComponent(item));
           }
-        });
-      } else if (typeof v === 'object') {
-        flatten(v, key);
-      } else {
-        body.append(key, v);
-      }
+        }
+      });
+    } else if (typeof v === 'object') {
+      parts = parts.concat(buildQueryString(v, key));
+    } else {
+      parts.push(encodeURIComponent(key) + '=' + encodeURIComponent(v));
     }
   }
-  flatten(params, '');
-  const resp = await fetch(url, { method: 'POST', body });
+  return parts;
+}
+
+async function bxCall(method, params) {
+  params = params || {};
+  if (!CONFIG.webhook) throw new Error('Webhook не настроен');
+  const url = CONFIG.webhook + method + '.json';
+  const bodyStr = buildQueryString(params, '').join('&');
+  const resp = await fetch(url, {
+    method: 'POST',
+    mode: 'cors',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: bodyStr
+  });
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
   const data = await resp.json();
   if (data.error) throw new Error(data.error_description || data.error);
@@ -1145,29 +1147,13 @@ async function bxCallAll(method, params = {}) {
   while (true) {
     const p = { ...params, start };
     const url = CONFIG.webhook + method + '.json';
-    const body = new URLSearchParams();
-    function flatten2(obj, prefix) {
-      for (var k in obj) {
-        if (!obj.hasOwnProperty(k)) continue;
-        var v = obj[k];
-        var key = prefix ? prefix + '[' + k + ']' : k;
-        if (v === null || v === undefined || v === '') continue;
-        if (Array.isArray(v)) {
-          v.forEach(function(item, i) {
-            if (item !== null && item !== undefined) {
-              if (typeof item === 'object') flatten2(item, key + '[' + i + ']');
-              else body.append(key + '[' + i + ']', item);
-            }
-          });
-        } else if (typeof v === 'object') {
-          flatten2(v, key);
-        } else {
-          body.append(key, v);
-        }
-      }
-    }
-    flatten2(p, '');
-    const resp = await fetch(url, { method: 'POST', body });
+    const bodyStr = buildQueryString(p, '').join('&');
+    const resp = await fetch(url, {
+      method: 'POST',
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: bodyStr
+    });
     const data = await resp.json();
     if (data.error) throw new Error(data.error_description || data.error);
     const result = data.result || [];
@@ -1350,7 +1336,8 @@ async function loadDeals() {
       'UF_CRM_1610107379506', 'UF_CRM_1606651083093', 'UF_CRM_1609923363363',
       'UF_CRM_1670774455887', 'UF_CRM_1679484014422', 'UF_CRM_1679484171126',
       'UF_CRM_1621335244025', 'UF_CRM_1643644504930', 'UF_CRM_1739183976913',
-      'UF_CRM_1739184006572', 'UF_CRM_1730370141733'
+      'UF_CRM_1739184006572', 'UF_CRM_1730370141733',
+      'UF_CRM_1611827119611'  // Дата оформления
     ]
   });
 
@@ -1627,8 +1614,12 @@ async function createProlongationDeal(sourceDeal) {
     activityFields['fields[COMMUNICATIONS][0][ENTITY_ID]'] = String(sourceDeal.CONTACT_ID);
   }
   
-  const actBody = new URLSearchParams(activityFields);
-  const actResp = await fetch(CONFIG.webhook + 'crm.activity.add.json', { method: 'POST', body: actBody });
+  const actBodyStr = buildQueryString(activityFields, '').join('&');
+  const actResp = await fetch(CONFIG.webhook + 'crm.activity.add.json', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: actBodyStr
+  });
   if (actResp.ok) {
     const actData = await actResp.json();
     if (actData.error) addLog('warn', 'Дело: ' + actData.error_description);
@@ -1657,36 +1648,41 @@ function buildMessage(deal) {
   const managerName = MANAGERS[deal.ASSIGNED_BY_ID] || '';
   const firstName = managerName.split(' ')[0] || '';
 
+  // Страховой год из даты окончания полиса
+  const policyYear = policyEnd ? new Date(policyEnd).getFullYear() : new Date().getFullYear();
+  const nextYear = policyYear + 1;
+  const insuranceYear = policyYear + '-' + nextYear;
+
   if (type === 'ИПОТЕКА') {
-    return 'Здравствуйте, ' + name + '!' +
-      '\n\nСрок действия вашего полиса ипотечного страхования заканчивается ' + endStr + '.' +
-      '\n\nДля подготовки расчёта прошу уточнить:' +
-      '\n— актуален ли остаток задолженности по ипотеке на сегодня?' +
-      '\n— изменились ли личные данные (паспорт, адрес прописки)?' +
-      '\n\nКак только получу информацию — сразу подберу лучшие условия и подготовлю предложение.' +
-      '\n\nС уважением, ' + firstName;
+    return name + ', добрый день!' +
+      '\n\nВаш ипотечный полис заканчивается ' + endStr + ' — самое время зафиксировать хорошие условия на ' + insuranceYear + ' страховой год.' +
+      '\n\nЧтобы подобрать лучшие условия, мне нужно от вас:' +
+      '\n— остаток по ипотеке на сегодня (в приложении банка)' +
+      '\n— ничего не поменялось в документах? (паспорт, прописка)' +
+      '\n\n' + firstName;
   }
 
   if (type === 'КАСКО' || type === 'КАСКО_ЛИД') {
-    return 'Здравствуйте, ' + name + '!' +
-      '\n\nСрок действия вашего полиса КАСКО заканчивается ' + endStr + '.' +
-      '\n\nДля расчёта продления прошу подтвердить — актуальны ли данные по автомобилю и водителям, или что-то изменилось?' +
-      '\n\nПодберём лучшие условия и оформим быстро.' +
-      '\n\nС уважением, ' + firstName;
+    return name + ', добрый день!' +
+      '\n\nВаш полис КАСКО заканчивается ' + endStr + ' — самое время зафиксировать хорошие условия на следующий год.' +
+      '\n\nЧтобы подобрать лучшие условия, мне нужно от вас:' +
+      '\n— данные по автомобилю и водителям те же, или что-то изменилось?' +
+      '\n— были ли страховые случаи в этом году?' +
+      '\n\n' + firstName;
   }
 
   if (type === 'ОСАГО') {
-    return 'Здравствуйте, ' + name + '!' +
-      '\n\nСрок действия вашего полиса ОСАГО заканчивается ' + endStr + '.' +
-      '\n\nДля расчёта продления прошу подтвердить — актуальны ли данные по автомобилю и водителям, или что-то изменилось?' +
-      '\n\nС уважением, ' + firstName;
+    return name + ', добрый день!' +
+      '\n\nВаш полис ОСАГО заканчивается ' + endStr + ' — самое время позаботиться о продлении.' +
+      '\n\nЧтобы подготовить расчёт, уточните:' +
+      '\n— данные по автомобилю и водителям те же, или что-то изменилось?' +
+      '\n\n' + firstName;
   }
 
-  return 'Здравствуйте, ' + name + '!' +
-    '\n\nСрок действия вашего страхового полиса заканчивается ' + endStr + '.' +
-    '\n\nМы готовы помочь с продлением — подберём выгодные условия и оформим быстро.' +
-    '\n\nУдобно ли вам обсудить это сейчас?' +
-    '\n\nС уважением, ' + firstName;
+  return name + ', добрый день!' +
+    '\n\nВаш страховой полис заканчивается ' + endStr + ' — самое время зафиксировать хорошие условия на следующий год.' +
+    '\n\nЕсли актуально — напишите, сразу займусь!' +
+    '\n\n' + firstName;
 }
 
 // ===== DEALS TABLE =====
