@@ -480,6 +480,21 @@
     z-index: 99;
     margin-bottom: 4px;
   }
+.rec-filter-btn {
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border2);
+  background: var(--bg3);
+  color: var(--text2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.rec-filter-btn.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
 </style>
 <script src="//api.bitrix24.com/api/v1/"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -791,15 +806,15 @@
           <button class="btn btn-secondary btn-sm" onclick="setRecPeriod('q1_2026')">Янв-Мар 2026</button>
           <button class="btn btn-secondary btn-sm" onclick="setRecPeriod('year_2025')">Весь 2025</button>
         </div>
-        <select class="filter-select" id="rec-filter-type" multiple onchange="filterReconcile()" style="height:36px;min-width:140px" title="Ctrl+клик для выбора нескольких">
-          <option value="ИПОТЕКА">Ипотека</option>
-          <option value="КАСКО">КАСКО</option>
-          <option value="КАСКО_ЛИД">КАСКО ЛИД</option>
-          <option value="ОСАГО">ОСАГО</option>
-          <option value="ПРОЧЕЕ">Прочее</option>
-        </select>
-        <select class="filter-select" id="rec-filter-manager" multiple onchange="filterReconcile()" style="height:36px;min-width:160px" title="Ctrl+клик для выбора нескольких">
-        </select>
+        <div id="rec-type-filters" style="display:flex;gap:4px;flex-wrap:wrap">
+          <button class="rec-filter-btn active" data-group="type" data-val="ИПОТЕКА" onclick="toggleRecFilter(this)">Ипотека</button>
+          <button class="rec-filter-btn active" data-group="type" data-val="КАСКО" onclick="toggleRecFilter(this)">КАСКО</button>
+          <button class="rec-filter-btn active" data-group="type" data-val="КАСКО_ЛИД" onclick="toggleRecFilter(this)">КАСКО ЛИД</button>
+          <button class="rec-filter-btn active" data-group="type" data-val="ОСАГО" onclick="toggleRecFilter(this)">ОСАГО</button>
+          <button class="rec-filter-btn active" data-group="type" data-val="ПРОЧЕЕ" onclick="toggleRecFilter(this)">Прочее</button>
+        </div>
+        <div id="rec-mgr-filters" style="display:flex;gap:4px;flex-wrap:wrap">
+        </div>
         <button class="btn btn-primary btn-sm" onclick="loadReconcile()">🔄 Проверить</button>
         <button class="btn btn-primary btn-sm" id="rec-create-all-btn" style="display:none" onclick="createAllRecProlongations()">▶ Создать все</button>
         <button class="btn btn-secondary btn-sm" id="rec-export-btn" style="display:none" onclick="exportReconcileExcel()">📥 Excel</button>
