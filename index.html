@@ -1373,6 +1373,7 @@ async function loadDeals() {
       'UF_CRM_1621335244025', 'UF_CRM_1643644504930', 'UF_CRM_1739183976913',
       'UF_CRM_1739184006572', 'UF_CRM_1730370141733',
       'UF_CRM_1611827119611', // Дата оформления
+      'UF_CRM_1606651026893', // Номер договора ЖИЗНЬ (второе поле)
       'UF_CRM_1630331231491', // Номер договора ИПОТЕКА
       'UF_CRM_1637260544163', // Номер договора ЖИЗНЬ
       'UF_CRM_1621248599553', // Страховая премия ЖИЗНЬ
@@ -1583,7 +1584,15 @@ async function createProlongationDeal(sourceDeal) {
     // Bitrix UF date fields require YYYY-MM-DD format
     return dt.getFullYear() + '-' + pad(dt.getMonth()+1) + '-' + pad(dt.getDate());
   }
-  const policyEndStr = toB24Date(policyEnd);
+  // New policy dates = old dates + 1 year
+  const newPolicyEnd = policyEnd ? new Date(policyEnd) : null;
+  if (newPolicyEnd) newPolicyEnd.setFullYear(newPolicyEnd.getFullYear() + 1);
+  const policyEndStr = toB24Date(newPolicyEnd);
+
+  const policyStart = parseB24Date(sourceDeal[FIELD_POLICY_START]);
+  const newPolicyStart = policyStart ? new Date(policyStart) : null;
+  if (newPolicyStart) newPolicyStart.setFullYear(newPolicyStart.getFullYear() + 1);
+  const policyStartStr = toB24Date(newPolicyStart);
 
   const newDeal = {
     TITLE: title,
@@ -1614,6 +1623,7 @@ async function createProlongationDeal(sourceDeal) {
     'UF_CRM_1606651083093': sourceDeal['UF_CRM_1606651083093'] || '', // Год выпуска авто
     'UF_CRM_1609923363363': sourceDeal['UF_CRM_1609923363363'] || '', // Серия полиса
     'UF_CRM_1609923110282': sourceDeal['UF_CRM_1609923110282'] || '', // Номер полиса
+    'UF_CRM_1606651026893': sourceDeal['UF_CRM_1606651026893'] || '', // Номер договора ЖИЗНЬ (второе поле)
     'UF_CRM_1630331231491': sourceDeal['UF_CRM_1630331231491'] || '', // Номер договора ИПОТЕКА
     'UF_CRM_1637260544163': sourceDeal['UF_CRM_1637260544163'] || '', // Номер договора ЖИЗНЬ
     'UF_CRM_1621248599553': sourceDeal['UF_CRM_1621248599553'] || '', // Страховая премия ЖИЗНЬ
@@ -1627,8 +1637,8 @@ async function createProlongationDeal(sourceDeal) {
     'UF_CRM_1611755457413': sourceDeal['UF_CRM_1611755457413'] || '', // Вариант полиса (КВ%)
     'UF_CRM_1739183976913': sourceDeal['UF_CRM_1739183976913'] || '', // КБМ
     'UF_CRM_1739184006572': sourceDeal['UF_CRM_1739184006572'] || '', // Кол-во водителей
-    [FIELD_POLICY_END]: policyEndStr,
-    [FIELD_POLICY_START]: policyEndStr, // новый полис начинается с даты окончания старого
+    [FIELD_POLICY_END]: policyEndStr,   // дата окончания старого + 1 год
+    [FIELD_POLICY_START]: policyStartStr, // дата начала старого + 1 год
   };
 
   console.log('Creating deal with fields:', JSON.stringify({end: newDeal['UF_CRM_1609921954607'], start: newDeal['UF_CRM_1609921922120'], num: newDeal['UF_CRM_1630331231491']}));
@@ -1993,16 +2003,16 @@ async function loadPoints() {
                'UF_CRM_1606650631517','UF_CRM_1611755457413',
                'UF_CRM_1609920495607','SOURCE_ID','IS_RETURN_CUSTOMER',
                'UF_CRM_1630331231491','UF_CRM_1637260544163',
-               'UF_CRM_1621250213416','UF_CRM_1621251272586',
-               'UF_CRM_1606650372269','UF_CRM_1610107289284',
-               'UF_CRM_1610107379506','UF_CRM_1606651083093',
-               'UF_CRM_1609923363363','UF_CRM_1609923110282',
-               'UF_CRM_1670774455887','UF_CRM_1679484014422',
-               'UF_CRM_1679484171126','UF_CRM_1621335244025',
-               'UF_CRM_1643644504930','UF_CRM_1739183976913',
-               'UF_CRM_1739184006572','UF_CRM_1730370141733',
-               'UF_CRM_1611827119611','UF_CRM_1611829653533',
-               'UF_CRM_1668776684344']
+               'UF_CRM_1606651026893','UF_CRM_1621250213416',
+               'UF_CRM_1621251272586','UF_CRM_1606650372269',
+               'UF_CRM_1610107289284','UF_CRM_1610107379506',
+               'UF_CRM_1606651083093','UF_CRM_1609923363363',
+               'UF_CRM_1609923110282','UF_CRM_1670774455887',
+               'UF_CRM_1679484014422','UF_CRM_1679484171126',
+               'UF_CRM_1621335244025','UF_CRM_1643644504930',
+               'UF_CRM_1739183976913','UF_CRM_1739184006572',
+               'UF_CRM_1730370141733','UF_CRM_1611827119611',
+               'UF_CRM_1611829653533','UF_CRM_1668776684344']
     });
 
     // Filter out excluded users
@@ -2640,7 +2650,7 @@ async function loadReconcile() {
                'UF_CRM_1670774455887','UF_CRM_1679484014422','UF_CRM_1679484171126',
                'UF_CRM_1621335244025','UF_CRM_1643644504930','UF_CRM_1739183976913',
                'UF_CRM_1739184006572','UF_CRM_1630331231491','UF_CRM_1637260544163',
-               'UF_CRM_1621251272586']
+               'UF_CRM_1606651026893','UF_CRM_1621251272586']
     });
 
     // Enrich with _policyEnd for createProlongationDeal
