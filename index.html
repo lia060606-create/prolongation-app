@@ -657,7 +657,7 @@
           <span style="font-size:12px;color:var(--text2)">по</span>
           <input type="date" id="pf-date-to" style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);padding:4px 8px;color:var(--text);font-size:12px;font-family:inherit" onchange="loadCustomPeriod()">
         </div>
-        <select class="filter-select" id="filter-type" onchange="filterDeals()">
+        <select class="filter-select" id="filter-type" onchange="PROL_PERIOD==='custom' ? loadCustomPeriod() : filterDeals()">
           <option value="">Все воронки</option>
           <option value="ИПОТЕКА">Ипотека</option>
           <option value="КАСКО">КАСКО</option>
@@ -1772,7 +1772,24 @@ function setProlPeriod(period) {
   });
   const customDates = document.getElementById('pf-custom-dates');
   if (customDates) customDates.style.display = period === 'custom' ? 'flex' : 'none';
-  filterDeals();
+  if (period === 'custom') {
+    // Don't filter yet — wait for user to pick dates
+    // But if dates already set, load immediately
+    const fromEl = document.getElementById('pf-date-from');
+    const toEl = document.getElementById('pf-date-to');
+    if (fromEl && fromEl.value && toEl && toEl.value) {
+      loadCustomPeriod();
+    } else {
+      FILTERED_DEALS = [];
+      const countEl = document.getElementById('prol-count');
+      if (countEl) countEl.textContent = 'Выберите период';
+      const contentEl = document.getElementById('deals-content');
+      if (contentEl) contentEl.innerHTML = '<div class="empty-state"><div class="empty-icon">📅</div><div class="empty-title">Выберите даты периода</div></div>';
+    }
+  } else {
+    CUSTOM_DEALS = [];
+    filterDeals();
+  }
 }
 
 function getProlPeriodRange() {
