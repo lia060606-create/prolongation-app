@@ -653,9 +653,9 @@
         </div>
         <div id="pf-custom-dates" style="display:none;align-items:center;gap:6px">
           <span style="font-size:12px;color:var(--text2)">с</span>
-          <input type="date" id="pf-date-from" style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);padding:4px 8px;color:var(--text);font-size:12px;font-family:inherit" onchange="filterDeals()">
+          <input type="date" id="pf-date-from" style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);padding:4px 8px;color:var(--text);font-size:12px;font-family:inherit" onchange="loadCustomPeriod()">
           <span style="font-size:12px;color:var(--text2)">по</span>
-          <input type="date" id="pf-date-to" style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);padding:4px 8px;color:var(--text);font-size:12px;font-family:inherit" onchange="filterDeals()">
+          <input type="date" id="pf-date-to" style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);padding:4px 8px;color:var(--text);font-size:12px;font-family:inherit" onchange="loadCustomPeriod()">
         </div>
         <select class="filter-select" id="filter-type" onchange="filterDeals()">
           <option value="">Все воронки</option>
@@ -1818,15 +1818,9 @@ function filterDeals() {
       case 'month':
         return days >= 0 && days <= 90;
       case 'custom': {
-        const fromEl = document.getElementById('pf-date-from');
-        const toEl = document.getElementById('pf-date-to');
-        if (!fromEl || !fromEl.value || !toEl || !toEl.value) return true;
-        const policyEndDate = d._policyEnd ? new Date(d._policyEnd) : null;
-        if (!policyEndDate) return false;
-        const from = new Date(fromEl.value);
-        const to = new Date(toEl.value);
-        to.setHours(23,59,59);
-        return policyEndDate >= from && policyEndDate <= to;
+        // Custom period uses separately loaded CUSTOM_DEALS, not ALL_DEALS
+        // This case should not filter — loadCustomPeriod handles it
+        return true;
       }
       default:
         return days >= (d._threshold - 1) && days <= (d._threshold + 1);
@@ -1903,6 +1897,96 @@ function renderDealsTable() {
 
   html += '</tbody></table></div>';
   document.getElementById('deals-content').innerHTML = html;
+}
+
+
+// ===== CUSTOM PERIOD - loads from Bitrix directly =====
+let CUSTOM_DEALS = [];
+
+async function loadCustomPeriod() {
+  const fromEl = document.getElementById('pf-date-from');
+  const toEl = document.getElementById('pf-date-to');
+  if (!fromEl || !fromEl.value || !toEl || !toEl.value) return;
+
+  const dateFrom = fromEl.value;
+  const dateTo = toEl.value;
+
+  const contentEl = document.getElementById('deals-content');
+  if (contentEl) contentEl.innerHTML = '<div class="empty-state"><div class="spinner"></div><div class="empty-sub" style="margin-top:12px">Загружаем сделки за период ' + dateFrom + ' — ' + dateTo + '...</div></div>';
+
+  try {
+    const typeF = document.getElementById('filter-type') ? document.getElementById('filter-type').value : '';
+    const mgrF = document.getElementById('filter-manager') ? document.getElementById('filter-manager').value : '';
+
+    const filterObj = { 'STAGE_SEMANTIC_ID': 'S' };
+    filterObj['>=' + FIELD_POLICY_END] = dateFrom;
+    filterObj['<=' + FIELD_POLICY_END] = dateTo;
+    if (typeF) {
+      const catId = {'ИПОТЕКА':'1','КАСКО':'3','ПРОЧЕЕ':'5','КАСКО_ЛИД':'7','ОСАГО':'0'}[typeF];
+      if (catId !== undefined) filterObj['CATEGORY_ID'] = catId;
+    }
+
+    const deals = await bxCallAll('crm.deal.list', {
+      filter: filterObj,
+      select: [
+        'ID','TITLE','ASSIGNED_BY_ID','CLOSEDATE','BEGINDATE',
+        'OPPORTUNITY','CURRENCY_ID','COMMENTS','CATEGORY_ID',
+        'CONTACT_ID','DATE_CREATE',
+        FIELD_POLICY_END, FIELD_POLICY_START,
+        FIELD_COMMENT_UF, FIELD_SK, FIELD_BANK, FIELD_PREMIUM,
+        FIELD_SOURCE, FIELD_POLICY_NUM, 'UF_CRM_1611755457413', 'SOURCE_ID', 'IS_RETURN_CUSTOMER',
+        'UF_CRM_1611829653533', 'UF_CRM_1606650372269', 'UF_CRM_1610107289284',
+        'UF_CRM_1610107379506', 'UF_CRM_1606651083093', 'UF_CRM_1609923363363',
+        'UF_CRM_1670774455887', 'UF_CRM_1679484014422', 'UF_CRM_1679484171126',
+        'UF_CRM_1621335244025', 'UF_CRM_1643644504930', 'UF_CRM_1739183976913',
+        'UF_CRM_1739184006572', 'UF_CRM_1730370141733',
+        'UF_CRM_1611827119611', 'UF_CRM_1606651026893',
+        'UF_CRM_1630331231491', 'UF_CRM_1637260544163',
+        'UF_CRM_1621248599553', 'UF_CRM_1621249661361',
+        'UF_CRM_1621250213416', 'UF_CRM_1621251272586'
+      ]
+    });
+
+    // Enrich
+    deals.forEach(d => {
+      d.CATEGORY_NAME = d._type || getPipelineType(d);
+      d._type = getPipelineType(d);
+      d._policyEnd = parseB24Date(d[FIELD_POLICY_END]);
+      d._policyStart = parseB24Date(d[FIELD_POLICY_START]);
+      const commentRaw = (d[FIELD_COMMENT_UF] || '').replace(/\[\/?[a-z]+\]/gi,' ').replace(/\s+/g,' ').trim();
+      d._commentText = commentRaw;
+      d._hasComment = !!(commentRaw && commentRaw.trim() && commentRaw !== 'null' && commentRaw !== '0');
+      d._sk = d[FIELD_SK] || '';
+      d._bank = d[FIELD_BANK] || '';
+      d._premium = d[FIELD_PREMIUM] ? parseFloat(d[FIELD_PREMIUM]) : 0;
+      d._kv = parseFloat(d['UF_CRM_1611755457413'] || 0);
+      d._policyNum = (d[FIELD_POLICY_NUM] || '').toString().trim();
+      d._daysUntil = daysUntil(d._policyEnd);
+      d._threshold = getDaysThreshold(d._type);
+      d._source = (d[FIELD_SOURCE] || '').toString();
+      d._isProlongationDeal = d._source === SOURCE_PROLONGATION || d._source === '80';
+      const createYear = d.DATE_CREATE ? new Date(d.DATE_CREATE).getFullYear() : 0;
+      d._isCurrentYear = createYear === new Date().getFullYear();
+      d._isTooOld = createYear > 0 && createYear < 2025;
+      d._needsProlongation = true; // all deals in range need prolongation check
+    });
+
+    let filtered = deals;
+    if (mgrF) filtered = filtered.filter(d => MANAGERS[d.ASSIGNED_BY_ID] === mgrF);
+
+    CUSTOM_DEALS = filtered;
+    FILTERED_DEALS = filtered;
+
+    const descEl = document.getElementById('prol-desc');
+    if (descEl) descEl.textContent = 'Полис заканчивается ' + dateFrom.split('-').reverse().join('.') + ' — ' + dateTo.split('-').reverse().join('.');
+    const countEl = document.getElementById('prol-count');
+    if (countEl) countEl.textContent = filtered.length + ' сделок';
+
+    renderDealsTable();
+  } catch(e) {
+    const contentEl = document.getElementById('deals-content');
+    if (contentEl) contentEl.innerHTML = '<div class="alert alert-err"><div class="alert-icon">✗</div><div class="alert-body"><div class="alert-title">Ошибка</div><div class="alert-text">' + e.message + '</div></div></div>';
+  }
 }
 
 // ===== MODAL =====
