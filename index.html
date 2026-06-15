@@ -2779,7 +2779,7 @@ async function loadReconcile() {
     // Step 2: Load prolongation deals created AFTER the checked period
     // If we check July 2025, prolongations must be created after July 2025
     // to be considered valid renewals for 2026
-    const periodEndDate = new Date(dateTo);
+    const curYear = now.getFullYear();
     const curFilter = { '>=DATE_CREATE': dateTo }; // only deals created AFTER the period
     curFilter['UF_CRM_1609920495607'] = '76'; // источник = Пролонгация
 
