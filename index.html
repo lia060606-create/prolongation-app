@@ -1998,6 +1998,14 @@ async function loadCustomPeriod() {
     CUSTOM_DEALS = filtered;
     FILTERED_DEALS = filtered;
 
+    // Fill manager dropdown from loaded deals
+    const mf = document.getElementById('filter-manager');
+    if (mf) {
+      const currentVal = mf.value;
+      const names = [...new Set(filtered.map(d => MANAGERS[d.ASSIGNED_BY_ID]).filter(Boolean))].sort();
+      mf.innerHTML = '<option value="">Все менеджеры</option>' + names.map(n => '<option value="' + n + '"' + (n === currentVal ? ' selected' : '') + '>' + n + '</option>').join('');
+    }
+
     const descEl = document.getElementById('prol-desc');
     if (descEl) descEl.textContent = 'Полис заканчивается ' + dateFrom.split('-').reverse().join('.') + ' — ' + dateTo.split('-').reverse().join('.');
     const countEl = document.getElementById('prol-count');
@@ -2768,24 +2776,27 @@ async function loadReconcile() {
 
     addLog('ok', 'Сверка: найдено ' + prevDeals.length + ' сделок за период');
 
-    // Step 2: Load ONLY prolongation deals from current year (source=76 or 80)
-    // This is much faster than loading ALL deals
-    const curYear = now.getFullYear();
-    // Search prolongations from last 18 months to catch Dec 2025 cases
-    const curFilter = { '>=DATE_CREATE': (curYear - 1) + '-07-01' };
+    // Step 2: Load prolongation deals created AFTER the checked period
+    // If we check July 2025, prolongations must be created after July 2025
+    // to be considered valid renewals for 2026
+    const periodEndDate = new Date(dateTo);
+    const curFilter = { '>=DATE_CREATE': dateTo }; // only deals created AFTER the period
     curFilter['UF_CRM_1609920495607'] = '76'; // источник = Пролонгация
 
     const curDeals = await bxCallAll('crm.deal.list', {
       filter: curFilter,
-      select: ['ID','TITLE','CONTACT_ID','CATEGORY_ID','DATE_CREATE','UF_CRM_1609923110282']
+      select: ['ID','TITLE','CONTACT_ID','CATEGORY_ID','DATE_CREATE','UF_CRM_1609923110282',
+               'UF_CRM_1630331231491','UF_CRM_1606651026893']
     });
 
     addLog('ok', 'Сверка: найдено ' + curDeals.length + ' пролонгаций в ' + curYear + ' году');
 
-    // Build lookup sets
-    const prolongByPolicyNum = new Set(
-      curDeals.filter(d => d['UF_CRM_1609923110282']).map(d => d['UF_CRM_1609923110282'].toString().trim())
-    );
+    // Build lookup sets — check by policy number (all three fields) and contact+category
+    const prolongByPolicyNum = new Set([
+      ...curDeals.filter(d => d['UF_CRM_1609923110282']).map(d => d['UF_CRM_1609923110282'].toString().trim()),
+      ...curDeals.filter(d => d['UF_CRM_1630331231491'] && d['UF_CRM_1630331231491'] !== '0').map(d => d['UF_CRM_1630331231491'].toString().trim()),
+      ...curDeals.filter(d => d['UF_CRM_1606651026893'] && d['UF_CRM_1606651026893'] !== '0').map(d => d['UF_CRM_1606651026893'].toString().trim()),
+    ].filter(Boolean));
     const prolongByContact = new Set(
       curDeals.filter(d => d.CONTACT_ID).map(d => d.CONTACT_ID + '_' + d.CATEGORY_ID)
     );
